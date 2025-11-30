@@ -1,0 +1,21 @@
+# Backend Requirements for LLM Code Vulnerability Analysis Framework
+
+# Static Analysis Tools
+bandit>=1.7.5
+pylint>=3.0.0
+
+# Code Analysis
+astroid>=3.0.0
+
+# HTTP and API
+requests>=2.31.0
+
+# Data Processing
+pandas>=2.0.0
+
+# OpenAI Integration
+openai>=1.0.0
+
+# Additional Security Tools (Optional)
+# semgrep>=1.45.0
+# defusedxml>=0.7.1
