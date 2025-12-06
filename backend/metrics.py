@@ -88,29 +88,44 @@ class MetricsCalculator:
                 'effectiveness_score': 1.0
             }
         
-        cwes_before = set(v.get('cwe_id') for v in vulns_before if v.get('cwe_id'))
-        cwes_after = set(v.get('cwe_id') for v in vulns_after if v.get('cwe_id'))
+        # Create unique identifiers for each vulnerability (CWE + line + detection method)
+        def make_vuln_key(v):
+            return (
+                v.get('cwe_id', 'Unknown'),
+                v.get('line', v.get('line_number', 'Unknown')),
+                v.get('detection_method', v.get('source', 'Unknown'))
+            )
         
-        fixed_cwes = cwes_before - cwes_after
-        remaining_cwes = cwes_after.intersection(cwes_before)
-        new_cwes = cwes_after - cwes_before  # Issues introduced by patching
+        vulns_before_keys = set(make_vuln_key(v) for v in vulns_before)
+        vulns_after_keys = set(make_vuln_key(v) for v in vulns_after)
         
-        fix_rate = len(fixed_cwes) / len(cwes_before) if cwes_before else 0.0
+        fixed_vulns = vulns_before_keys - vulns_after_keys
+        remaining_vulns = vulns_after_keys.intersection(vulns_before_keys)
+        new_vulns = vulns_after_keys - vulns_before_keys  # Issues introduced by patching
+        
+        fix_rate = len(fixed_vulns) / len(vulns_before_keys) if vulns_before_keys else 0.0
         
         # Penalize if new vulnerabilities were introduced
-        effectiveness = fix_rate - (len(new_cwes) * 0.1)  # Penalty for new issues
+        effectiveness = fix_rate - (len(new_vulns) * 0.1)  # Penalty for new issues
         effectiveness = max(0.0, min(1.0, effectiveness))
+        
+        # Extract CWE info for reporting
+        cwes_before = set(v.get('cwe_id') for v in vulns_before if v.get('cwe_id'))
+        cwes_after = set(v.get('cwe_id') for v in vulns_after if v.get('cwe_id'))
+        fixed_cwes = cwes_before - cwes_after
+        remaining_cwes = cwes_after.intersection(cwes_before)
+        new_cwes = cwes_after - cwes_before
         
         return {
             'fix_rate': round(fix_rate, 3),
-            'vulnerabilities_fixed': len(fixed_cwes),
-            'vulnerabilities_remaining': len(remaining_cwes),
-            'new_vulnerabilities': len(new_cwes),
-            'total_vulnerabilities': len(cwes_before),
+            'vulnerabilities_fixed': len(fixed_vulns),
+            'vulnerabilities_remaining': len(remaining_vulns),
+            'new_vulnerabilities': len(new_vulns),
+            'total_vulnerabilities': len(vulns_before_keys),
             'effectiveness_score': round(effectiveness, 3),
-            'fixed_cwe_ids': sorted(fixed_cwes),
-            'remaining_cwe_ids': sorted(remaining_cwes),
-            'new_cwe_ids': sorted(new_cwes)
+            'fixed_cwe_ids': sorted(str(cwe) for cwe in fixed_cwes),
+            'remaining_cwe_ids': sorted(str(cwe) for cwe in remaining_cwes),
+            'new_cwe_ids': sorted(str(cwe) for cwe in new_cwes)
         }
     
     @staticmethod
@@ -188,16 +203,21 @@ class MetricsCalculator:
     ) -> Dict:
         """
         Calculate comprehensive metrics for the entire workflow.
+        Combined metrics from custom detector, Bandit, and Semgrep.
+
+        Note: 'detected_vulns' should represent ALL findings across all iterations
+        and tools (custom, Bandit, Semgrep). 'vulns_after_patch' should represent
+        the remaining findings on the final patched code from all tools.
         
         Returns:
             Dict with all metrics combined
         """
-        # Patching effectiveness
+        # Patching effectiveness (includes all tools)
         patching_metrics = MetricsCalculator.calculate_patching_effectiveness(
             detected_vulns, vulns_after_patch
         )
         
-        # Tool comparison
+        # Tool comparison (final analysis)
         tool_comparison = MetricsCalculator.calculate_tool_comparison_metrics(
             primary_tool_results, secondary_tool_results
         )
@@ -207,6 +227,13 @@ class MetricsCalculator:
         severity_after = MetricsCalculator.generate_severity_breakdown(vulns_after_patch)
         cwe_breakdown = MetricsCalculator.generate_cwe_breakdown(detected_vulns)
         
+        # Calculate individual tool contributions
+        custom_detector_count = len([v for v in detected_vulns if v.get('detection_method') not in {'bandit', 'semgrep'}])
+        bandit_count = len([v for v in vulns_after_patch if v.get('detection_method') == 'bandit'])
+        semgrep_count = len([v for v in vulns_after_patch if v.get('detection_method') == 'semgrep'])
+
+        fixed_total = max(0, len(detected_vulns) - len(vulns_after_patch))
+        
         return {
             'patching_effectiveness': patching_metrics,
             'tool_comparison': tool_comparison,
@@ -214,7 +241,11 @@ class MetricsCalculator:
             'severity_after_patch': severity_after,
             'cwe_distribution': cwe_breakdown,
             'total_detected': len(detected_vulns),
-            'total_after_patch': len(vulns_after_patch),
+            'total_remaining': len(vulns_after_patch),
+            'total_fixed': fixed_total,
+            'custom_detector_initial': custom_detector_count,
+            'bandit_remaining': bandit_count,
+            'semgrep_remaining': semgrep_count,
             'overall_success_rate': patching_metrics.get('effectiveness_score', 0.0)
         }
 

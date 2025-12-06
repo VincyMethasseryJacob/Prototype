@@ -59,7 +59,7 @@ def get_prompt_count_text(count, max_count):
 
 def get_analysis_header():
     """Return the analysis results page header."""
-    return "<h2 style='text-align:center;'> Vulnerability Analysis Report</h2>"
+    return "<h2 style='text-align:center;'> LLM Vulnerability Analysis Report</h2>"
 
 
 def get_api_key_screen():

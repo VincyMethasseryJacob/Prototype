@@ -37,6 +37,64 @@ MAX_PROMPTS = 20
 MAX_RESPONSE_TOKENS = 5000
 
 
+def get_code_context(code: str, line_number: int, context_lines: int = 2) -> str:
+    """
+    Extract code context around a specific line with an arrow pointing to the issue.
+    
+    Args:
+        code: The full source code
+        line_number: The line number where the issue occurs (1-indexed)
+        context_lines: Number of lines to show before and after the issue line
+        
+    Returns:
+        Formatted string with code context and arrow
+    """
+    lines = code.split('\n')
+    total_lines = len(lines)
+    
+    # Calculate range (convert to 0-indexed)
+    start_line = max(0, line_number - 1 - context_lines)
+    end_line = min(total_lines, line_number + context_lines)
+    
+    # Build the context string
+    context_parts = []
+    for i in range(start_line, end_line):
+        line_num = i + 1
+        line_content = lines[i] if i < len(lines) else ""
+        
+        if line_num == line_number:
+            # Add arrow for the issue line
+            context_parts.append(f"→ {line_num:>3}: {line_content}")
+        else:
+            context_parts.append(f"  {line_num:>3}: {line_content}")
+    
+    return '\n'.join(context_parts)
+
+
+def get_code_from_iteration_file(iteration_file_path: str, line_number: int, context_lines: int = 2) -> str:
+    """
+    Read code context from an iteration file.
+    
+    Args:
+        iteration_file_path: Path to the iteration code file
+        line_number: The line number where the issue occurs (1-indexed)
+        context_lines: Number of lines to show before and after the issue line
+        
+    Returns:
+        Formatted string with code context and arrow, or empty string if file not found
+    """
+    try:
+        if os.path.exists(iteration_file_path):
+            with open(iteration_file_path, 'r', encoding='utf-8') as f:
+                code = f.read()
+            return get_code_context(code, line_number, context_lines)
+        else:
+            return ""
+    except Exception as e:
+        st.warning(f"Could not read iteration file: {str(e)}")
+        return ""
+
+
 class App:
     def __init__(self):
         st.set_page_config(
@@ -61,10 +119,12 @@ class App:
                     vulnerable_samples_dir=VULNERABLE_SAMPLES_DIR,
                     reports_dir=REPORTS_DIR,
                     openai_client=self.client_wrapper,
-                    max_patch_iterations=3
+                    max_patch_iterations=6
                 )
-            except Exception:
+                st.session_state.api_init_error = ""
+            except Exception as e:
                 st.session_state.api_loaded = False
+                st.session_state.api_init_error = str(e)
                 self.client_wrapper = None
                 self.workflow = None
 
@@ -72,6 +132,7 @@ class App:
         defaults = {
             "api_loaded": False,
             "api_key": "",
+            "api_init_error": "",
             "securityeval_map": {},
             "prompt_count": 0,
             "active_prompt": "",
@@ -89,6 +150,9 @@ class App:
         # If API already loaded, skip this screen
         if st.session_state.api_loaded:
             return
+
+        if st.session_state.get("api_init_error"):
+            st.error(f"Failed to initialize: {st.session_state.api_init_error}")
 
         with st.container():
             st.markdown(get_api_key_screen(), unsafe_allow_html=True)
@@ -108,10 +172,12 @@ class App:
                         st.session_state.api_key = api_key.strip()
                         st.session_state.api_loaded = True
                         st.session_state.securityeval_map = self.loader.load_prompts(TESTCASES_DIR)
+                        st.session_state.api_init_error = ""
                         st.success("API key validated! Loading application…")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Failed to initialize OpenAI client: {e}")
+                        st.session_state.api_init_error = str(e)
 
         # Stop rendering below until API is loaded
         st.stop()
@@ -230,10 +296,6 @@ class App:
                             prompt=st.session_state.get("active_prompt", "")
                         )
                         st.session_state.last_workflow_result = workflow_result
-                    if workflow_result.get('vulnerability_count', 0) > 0:
-                        st.session_state.show_analysis_view = True
-                        st.rerun()
-                    self._display_workflow_results(workflow_result)
                     self.audit.save(
                         {
                             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
@@ -245,6 +307,19 @@ class App:
                             "workflow_id": workflow_result.get('workflow_id')
                         }
                     )
+                    # Only show analysis view if vulnerabilities found by any tool
+                    custom_count = workflow_result.get('vulnerability_count', 0)
+                    bandit_count = len(workflow_result.get('bandit_original', {}).get('issues', []))
+                    semgrep_count = len(workflow_result.get('semgrep_original', {}).get('issues', []))
+                    total_vulns = custom_count + bandit_count + semgrep_count
+                    
+                    if total_vulns > 0:
+                        st.session_state.show_analysis_view = True
+                    st.rerun()
+            
+            # Display results if analysis was run but no vulnerabilities found (staying on same page)
+            if st.session_state.get("last_workflow_result") and not st.session_state.get("show_analysis_view"):
+                self._display_workflow_results(st.session_state.last_workflow_result)
 
     # -------------------- DATASET UI --------------------
     def _ui_dataset_prompt(self, wide=False):
@@ -253,6 +328,18 @@ class App:
             st.info("Dataset folder is empty.")
             return
         selected = st.selectbox("Select sample:", list(mp.keys()), key="dataset_select")
+        
+        # Track dataset selection changes and clear state when different sample is selected
+        if "last_selected_dataset" not in st.session_state:
+            st.session_state.last_selected_dataset = selected
+        elif st.session_state.last_selected_dataset != selected:
+            # Clear previous results when selecting a different dataset sample
+            st.session_state.last_selected_dataset = selected
+            st.session_state.last_generated_code = None
+            st.session_state.last_workflow_result = None
+            st.session_state.show_analysis_view = False
+            st.session_state.active_prompt = ""
+        
         st.markdown(get_dropdown_width_style(230), unsafe_allow_html=True)
         entry = mp[selected]
         content = entry["content"]
@@ -312,10 +399,6 @@ class App:
                             prompt=st.session_state.get("active_prompt", "")
                         )
                         st.session_state.last_workflow_result = workflow_result
-                    if workflow_result.get('vulnerability_count', 0) > 0:
-                        st.session_state.show_analysis_view = True
-                        st.rerun()
-                    self._display_workflow_results(workflow_result)
                     self.audit.save(
                         {
                             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
@@ -328,6 +411,19 @@ class App:
                             "workflow_id": workflow_result.get('workflow_id')
                         }
                     )
+                    # Only show analysis view if vulnerabilities found by any tool
+                    custom_count = workflow_result.get('vulnerability_count', 0)
+                    bandit_count = len(workflow_result.get('bandit_original', {}).get('issues', []))
+                    semgrep_count = len(workflow_result.get('semgrep_original', {}).get('issues', []))
+                    total_vulns = custom_count + bandit_count + semgrep_count
+                    
+                    if total_vulns > 0:
+                        st.session_state.show_analysis_view = True
+                    st.rerun()
+            
+            # Display results if analysis was run but no vulnerabilities found (staying on same page)
+            if st.session_state.get("last_workflow_result") and not st.session_state.get("show_analysis_view"):
+                self._display_workflow_results(st.session_state.last_workflow_result)
 
     # -------------------- UTIL --------------------
     @staticmethod
@@ -379,9 +475,9 @@ class App:
         
         # Smaller heading when shown inline; larger on dedicated analysis page
         if st.session_state.get("show_analysis_view"):
-            st.markdown("## 🔍 Vulnerability Analysis Results")
+            st.markdown("## 🔍 LLM Vulnerability Analysis Results")
         else:
-            st.markdown("### 🔍 Vulnerability Analysis Results")
+            st.markdown("### 🔍 LLM Vulnerability Analysis Results")
         
         # Status badge
         status = results.get('status', 'unknown')
@@ -399,232 +495,622 @@ class App:
         # Summary metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Vulnerabilities Found", results.get('vulnerability_count', 0))
+            total_detected = results.get('metrics', {}).get('total_detected', results.get('vulnerability_count', 0))
+            st.metric("Total Vulnerabilities Found", total_detected)
         with col2:
-            vulns_fixed = results.get('vulnerability_count', 0) - len(results.get('patch_result', {}).get('unpatched_vulns', []))
-            st.metric("Vulnerabilities Fixed", vulns_fixed)
+            total_fixed = results.get('metrics', {}).get('total_fixed', 0)
+            st.metric("Total Vulnerabilities Fixed", total_fixed)
         with col3:
             st.metric("Patch Iterations", results.get('total_iterations', 0))
         with col4:
             success_rate = results.get('metrics', {}).get('overall_success_rate', 0)
             st.metric("Success Rate", f"{success_rate:.1%}")
         
-        # Detected Vulnerabilities
-        st.markdown("### 🔴 Detected Vulnerabilities")
-        vulns = results.get('vulnerabilities_with_explanations', [])
+        # Detected Vulnerabilities Custom Detector- Collect from initial and all iterations
+        st.markdown("### 🔴 Custom Detector Vulnerabilities")
         
-        if vulns:
-            # Group vulnerabilities by CWE to avoid repeating descriptions
-            grouped = {}
-            for v in vulns:
-                cid = v.get('cwe_id')
-                if cid not in grouped:
-                    grouped[cid] = {
-                        'cwe_id': cid,
-                        'cwe_name': v.get('cwe_name'),
-                        'severity': v.get('severity'),
-                        'description': v.get('description'),
-                        'explanation': v.get('explanation'),
-                        'patch_note': v.get('patch_note'),
-                        'priority': v.get('remediation_priority'),
-                        'lines': [],
-                        'snippets': []
+        # Collect initial vulnerabilities
+        initial_vulns = results.get('vulnerabilities_with_explanations', [])
+        patch_iterations = results.get('patch_iterations', [])
+        
+        # Build comprehensive vulnerability tracking across all iterations
+        all_vulns_tracking = {}
+        
+        # Add initial vulnerabilities
+        for v in initial_vulns:
+            cwe_id = v.get('cwe_id')
+            key = (cwe_id, v.get('cwe_name'))
+            if key not in all_vulns_tracking:
+                all_vulns_tracking[key] = {
+                    'cwe_id': cwe_id,
+                    'cwe_name': v.get('cwe_name'),
+                    'severity': v.get('severity'),
+                    'description': v.get('description'),
+                    'explanation': v.get('explanation'),
+                    'patch_note': v.get('patch_note'),
+                    'priority': v.get('remediation_priority'),
+                    'initial_count': 0,
+                    'iteration_counts': {},  # {iteration_num: count}
+                    'all_lines': [],
+                    'all_occurrences': []  # [{source, line, snippet, explanation}]
+                }
+            all_vulns_tracking[key]['initial_count'] += 1
+            all_vulns_tracking[key]['all_lines'].append(v.get('line_number'))
+            all_vulns_tracking[key]['all_occurrences'].append({
+                'source': 'Initial Source Code',
+                'line': v.get('line_number'),
+                'snippet': v.get('code_snippet', ''),
+                'explanation': v.get('explanation', '')
+            })
+        
+        # Add iteration vulnerabilities from custom detector
+        for iter_idx, iteration in enumerate(patch_iterations[1:], 1):
+            custom_vulns = iteration.get('custom_detector_vulns', {})
+            for (cwe_id, cwe_name), vuln_info in custom_vulns.items():
+                key = (cwe_id, cwe_name)
+                if key not in all_vulns_tracking:
+                    all_vulns_tracking[key] = {
+                        'cwe_id': cwe_id,
+                        'cwe_name': cwe_name,
+                        'severity': 'MEDIUM',
+                        'description': f'Vulnerability detected in patched code',
+                        'explanation': vuln_info.get('explanations', [''])[0] if vuln_info.get('explanations') else '',
+                        'patch_note': 'See iteration details',
+                        'priority': 'Medium',
+                        'initial_count': 0,
+                        'iteration_counts': {},
+                        'all_lines': [],
+                        'all_occurrences': []
                     }
-                grouped[cid]['lines'].append(v.get('line_number'))
-                if v.get('code_snippet'):
-                    grouped[cid]['snippets'].append(v.get('code_snippet'))
-
-            # Summary table: one row per CWE
+                count = len(vuln_info['lines'])
+                all_vulns_tracking[key]['iteration_counts'][iter_idx] = count
+                all_vulns_tracking[key]['all_lines'].extend(vuln_info['lines'])
+                for i, line in enumerate(vuln_info['lines']):
+                    all_vulns_tracking[key]['all_occurrences'].append({
+                        'source': f'Patch Iteration {iter_idx}',
+                        'line': line,
+                        'snippet': '',
+                        'explanation': vuln_info['explanations'][i] if i < len(vuln_info['explanations']) else ''
+                    })
+        
+        if all_vulns_tracking:
+            # Summary table with initial + iteration tracking
             vuln_data = []
-            for g in grouped.values():
+            for key, g in all_vulns_tracking.items():
+                # Count total occurrences
+                total_occurrences = g['initial_count'] + sum(g['iteration_counts'].values())
+                
+                # Build found in column
+                found_in_parts = []
+                if g['initial_count'] > 0:
+                    found_in_parts.append("Source code")
+                for iter_num in sorted(g['iteration_counts'].keys()):
+                    found_in_parts.append(f"Iteration {iter_num}")
+                found_in = '; '.join(found_in_parts)
+                
+                # Get unique sorted lines
+                unique_lines = sorted(set(g['all_lines']), key=lambda x: int(x) if str(x).isdigit() else 0)
+                lines_str = ', '.join(str(l) for l in unique_lines)
+                
                 vuln_data.append({
                     'CWE ID': f"CWE-{g['cwe_id']}",
                     'Name': g['cwe_name'],
                     'Severity': g['severity'],
-                    'Lines': ', '.join(str(l) for l in sorted(g['lines'])),
+                    'Occurrences': total_occurrences,
+                    'Found In': found_in,
+                    'Lines': lines_str,
                     'Priority': g['priority']
                 })
+            
             st.dataframe(vuln_data, use_container_width=True)
-
-            # Detailed grouped vulnerability info
+            
+            # Get iteration code files for showing vulnerable code
+            final_reports = results.get('final_reports', {})
+            iteration_codes = final_reports.get('iteration_codes', {})
+            
+            # Enhanced detailed vulnerability view with better organization
             with st.expander("📋 View Detailed Vulnerability Information"):
-                for idx, g in enumerate(grouped.values(), 1):
-                    st.markdown(f"#### {idx}. CWE-{g['cwe_id']}: {g['cwe_name']}")
-                    st.markdown(f"**Severity:** {g['severity']} | **Lines:** {', '.join(str(l) for l in sorted(g['lines']))} | **Priority:** {g['priority']}")
-                    st.markdown(f"**Description:** {g['description']}")
-                    st.markdown(f"**Explanation:** {g['explanation']}")
-                    st.markdown(f"**Patch Recommendation:** {g['patch_note']}")
-                    if g['snippets']:
-                        for s in g['snippets'][:3]:  # limit to first 3 snippets
-                            st.code(s, language='python')
+                for idx, (key, g) in enumerate(all_vulns_tracking.items(), 1):
+                    # Use columns for better layout
+                    col_header, col_stats = st.columns([3, 1])
+                    with col_header:
+                        st.markdown(f"#### {idx}. CWE-{g['cwe_id']}: {g['cwe_name']}")
+                    with col_stats:
+                        st.metric("Total Occurrences", len(g['all_occurrences']))
+                    
+                    with st.container():
+                        st.markdown("**Description:**")
+                        st.info(g['description'])
+                        
+                        st.markdown("**Explanation:**")
+                        st.info(g['explanation'])
+                        
+                        st.markdown("**Patch Recommendation:**")
+                        st.success(g['patch_note'])
+                    
+                    # Occurrences by source
+                    st.markdown("**Occurrences Details:**")
+                    
+                    # Group by source and iteration
+                    by_source = {}
+                    for occ in g['all_occurrences']:
+                        source = occ['source']
+                        if source not in by_source:
+                            by_source[source] = []
+                        by_source[source].append(occ)
+                    
+                    # Display grouped by source with tabs if multiple sources
+                    if len(by_source) > 1:
+                        tabs = st.tabs(list(by_source.keys()))
+                        for tab, (source, occs) in zip(tabs, by_source.items()):
+                            with tab:
+                                for occ_idx, occ in enumerate(occs, 1):
+                                    st.markdown(f"**Line {occ['line']}**")
+                                    # Removed explanation display
+                                    # Try to get code from iteration file if it's from an iteration
+                                    code_shown = False
+                                    if 'Iteration' in source and iteration_codes:
+                                        import re
+                                        iter_match = re.search(r'Iteration (\d+)', source)
+                                        if iter_match:
+                                            iter_num = iter_match.group(1)
+                                            iter_key = f'iteration_{iter_num}'
+                                            if iter_key in iteration_codes:
+                                                iter_file = iteration_codes[iter_key]
+                                                code_context = get_code_from_iteration_file(iter_file, occ['line'], context_lines=3)
+                                                if code_context:
+                                                    st.code(code_context, language='python')
+                                                    code_shown = True
+                                    
+                                    # Fallback to stored snippet
+                                    if not code_shown and occ['snippet']:
+                                        st.code(occ['snippet'], language='python')
+                    else:
+                        # Single source, display directly
+                        source = list(by_source.keys())[0]
+                        st.markdown(f"*Source: {source}*")
+                        for occ_idx, occ in enumerate(by_source[source], 1):
+                            st.markdown(f"**{occ_idx}. Line {occ['line']}**")
+                            # Removed explanation display
+                            # Try to get code from iteration file or original code
+                            code_shown = False
+                            if 'Iteration' in source and iteration_codes:
+                                import re
+                                iter_match = re.search(r'Iteration (\d+)', source)
+                                if iter_match:
+                                    iter_num = iter_match.group(1)
+                                    iter_key = f'iteration_{iter_num}'
+                                    if iter_key in iteration_codes:
+                                        iter_file = iteration_codes[iter_key]
+                                        code_context = get_code_from_iteration_file(iter_file, occ['line'], context_lines=3)
+                                        if code_context:
+                                            st.code(code_context, language='python')
+                                            code_shown = True
+                            elif 'Initial Source Code' in source:
+                                # Show code from original cleaned code
+                                original_code = results.get('cleaned_code', results.get('original_code', ''))
+                                if original_code:
+                                    code_context = get_code_context(original_code, occ['line'], context_lines=3)
+                                    if code_context:
+                                        st.code(code_context, language='python')
+                                        code_shown = True
+                            
+                            # Fallback to stored snippet
+                            if not code_shown and occ['snippet']:
+                                st.code(occ['snippet'], language='python')
+                    
                     st.markdown("---")
+        else:
+            st.success("✅ No vulnerabilities detected by Custom Detector!")
         
         # Patched Code
-        st.markdown("### ✅ Patched Code")
+        st.markdown("### ✅ Code Difference")
+        
+        # Show iteration info
+        total_iterations = results.get('total_iterations', 1)
+        patch_iterations = results.get('patch_iterations', [])
         final_code = results.get('final_patched_code', results.get('patch_result', {}).get('patched_code', ''))
+        bandit_final = results.get('bandit_final', {})
+        secondary_final = results.get('secondary_final', {})
+        metrics = results.get('metrics', {})
+        total_remaining = metrics.get('total_remaining', 0)
+        
+        if total_remaining == 0:
+            st.success("✅ **All vulnerabilities resolved!** This code has 0 issues detected by all three tools.")
+        else:
+            st.warning(f"⚠️ **{total_remaining} issues remaining** after {total_iterations} iteration(s). Some vulnerabilities could not be automatically fixed.")
         
         if final_code:
             col_before, col_after = st.columns(2)
             
             with col_before:
-                st.markdown("#### Before (Original)")
+                st.markdown("#### 📝 Before (Original)")
                 st.code(results.get('original_code', ''), language='python', line_numbers=True)
             
             with col_after:
-                st.markdown("#### After (Patched)")
+                st.markdown("#### ✨ After (Final Patched)")
                 st.code(final_code, language='python', line_numbers=True)
             
             # Changes applied
             changes = results.get('patch_result', {}).get('changes', [])
-            if changes:
-                with st.expander("🔧 View Applied Changes"):
-                    for i, change in enumerate(changes, 1):
-                        cwe_id = change.get('cwe_id', '')
-                        cwe_name = change.get('cwe_name', '')
-                        detection_method = change.get('detection_method', 'unknown')
-                        patch_method = change.get('patch_method', 'unknown')
+            col_changes, col_remaining = st.columns(2)
+            with col_changes:
+                if changes:
+                    with st.expander("🔧 View Applied Changes"):
+                        # Group changes by CWE and methods only (not by description)
+                        grouped_changes = {}
+                        for change in changes:
+                            cwe_id = change.get('cwe_id', '')
+                            cwe_name = change.get('cwe_name', '')
+                            detection_method = change.get('detection_method', 'unknown')
+                            patch_method = change.get('patch_method', 'unknown')
+                            change_desc = change.get('change_description', '')
+                            
+                            # Create grouping key (without change_description to group similar fixes)
+                            key = (cwe_id, cwe_name, detection_method, patch_method)
+                            
+                            if key not in grouped_changes:
+                                grouped_changes[key] = {
+                                    'lines': [],
+                                    'descriptions': [],
+                                    'cwe_id': cwe_id,
+                                    'cwe_name': cwe_name,
+                                    'detection_method': detection_method,
+                                    'patch_method': patch_method
+                                }
+                            
+                            line_num = change.get('line_number')
+                            if line_num is not None:
+                                grouped_changes[key]['lines'].append(line_num)
+                                grouped_changes[key]['descriptions'].append((line_num, change_desc))
                         
-                        # Format detection method for display
-                        detection_display = {
-                            'llm': 'LLM',
-                            'pattern': 'Pattern Matching',
-                            'ast': 'AST Analysis',
-                            'ast-param': 'AST Parameter Analysis',
-                            'ast-except': 'AST Exception Analysis',
-                            'ast-taint': 'AST Taint Analysis',
-                            'similarity': 'Code Similarity',
-                            'unknown': 'Unknown'
-                        }.get(detection_method, detection_method.upper())
-                        
-                        patch_display = {
-                            'rule-based': 'Rule-Based Patch',
-                            'llm-based': 'LLM-Generated Patch',
-                            'unknown': 'Unknown'
-                        }.get(patch_method, patch_method)
-                        
-                        st.markdown(f"**{i}. CWE-{cwe_id}: {cwe_name}**")
-                        st.markdown(f"Line {change.get('line_number')}: {change.get('change_description')}")
-                        st.markdown(f"_Detected by: {detection_display} | Fixed by: {patch_display}_")
-                        st.markdown("---")
+                        # Display grouped changes
+                        for i, (key, group) in enumerate(grouped_changes.items(), 1):
+                            cwe_id = group['cwe_id']
+                            cwe_name = group['cwe_name']
+                            detection_method = group['detection_method']
+                            patch_method = group['patch_method']
+                            lines = sorted(set(group['lines']))  # Remove duplicates and sort
+                            
+                            # Format detection method for display
+                            detection_display = {
+                                'llm': 'LLM',
+                                'pattern': 'Pattern Matching',
+                                'ast': 'AST Analysis',
+                                'ast-param': 'AST Parameter Analysis',
+                                'ast-except': 'AST Exception Analysis',
+                                'ast-taint': 'AST Taint Analysis',
+                                'similarity': 'Code Similarity',
+                                'unknown': 'Unknown'
+                            }.get(detection_method, detection_method.upper())
+                            
+                            patch_display = {
+                                'rule-based': 'Rule-Based Patch',
+                                'llm-based': 'LLM-Generated Patch',
+                                'unknown': 'Unknown'
+                            }.get(patch_method, patch_method)
+                            
+                            # Format line numbers display
+                            if len(lines) == 1:
+                                lines_text = f"Line {lines[0]}"
+                            else:
+                                lines_text = f"Lines {', '.join(map(str, lines))}"
+                            
+                            st.markdown(f"**{i}. CWE-{cwe_id}: {cwe_name}**")
+                            st.markdown(f"{lines_text}: Fixed")
+                            
+                            # Show individual descriptions if they vary
+                            if len(set(desc for _, desc in group['descriptions'])) > 1:
+                                st.markdown("**Changes:**")
+                                for line_num, desc in sorted(group['descriptions']):
+                                    st.markdown(f"  - Line {line_num}: {desc}")
+                            else:
+                                # All descriptions are the same, show just one
+                                if group['descriptions']:
+                                    st.markdown(f"**Change:** {group['descriptions'][0][1]}")
+                            
+                            st.markdown(f"_Detected by: {detection_display} | Fixed by: {patch_display}_")
+                            st.markdown("---")
+            with col_remaining:
+                with st.expander("❌ Vulnerabilities Not Fixed After All Iterations"):
+                    remaining_vulns = []
+
+                    # Custom detector remaining (final iteration unpatched_vulns)
+                    if patch_iterations and patch_iterations[-1].get('unpatched_vulns'):
+                        for v in patch_iterations[-1]['unpatched_vulns']:
+                            remaining_vulns.append({
+                                'Tool': 'Custom Detector',
+                                'CWE': v.get('cwe_id', 'N/A'),
+                                'Name': v.get('cwe_name', 'Unknown'),
+                                'Line': v.get('line_number', 'Unknown'),
+                                'Description': v.get('explanation', '')
+                            })
+
+                    # Bandit remaining on final code
+                    if bandit_final.get('success'):
+                        for issue in bandit_final.get('issues', []):
+                            remaining_vulns.append({
+                                'Tool': 'Bandit',
+                                'CWE': issue.get('test_id', 'N/A'),
+                                'Name': issue.get('issue_text', issue.get('test_name', 'Bandit Issue')),
+                                'Line': issue.get('line_number', 'Unknown'),
+                                'Description': issue.get('issue_text', '')
+                            })
+
+                    # Semgrep remaining on final code
+                    if secondary_final.get('success'):
+                        for issue in secondary_final.get('issues', []):
+                            lines = issue.get('line_number')
+                            line_list = lines if isinstance(lines, list) else ([lines] if lines is not None else [])
+                            for line in line_list:
+                                remaining_vulns.append({
+                                    'Tool': 'Semgrep',
+                                    'CWE': issue.get('message_id', issue.get('symbol', 'N/A')),
+                                    'Name': issue.get('description', 'Secondary Issue'),
+                                    'Line': line,
+                                    'Description': issue.get('description', '')
+                                })
+
+                    if remaining_vulns:
+                        st.dataframe(pd.DataFrame(remaining_vulns), use_container_width=True, hide_index=True)
+                    else:
+                        st.success("✅ All vulnerabilities were fixed!")
         
         # Static Analysis Results
         st.markdown("### 🔬 Static Analysis Results")
-        
+        st.info("ℹ️ Bandit and Semgrep analysis report on both original and iterated patched code.")
+
+        # Static analysis results (show both original and final)
         bandit_original = results.get('bandit_original', {})
-        bandit_patched = results.get('bandit_patched', {})
-        secondary_original = results.get('secondary_original', {})
-        secondary_patched = results.get('secondary_patched', {})
-        
+        bandit_patched = results.get('bandit_final', results.get('bandit_patched', {}))
+        secondary_original = results.get('semgrep_original', results.get('secondary_original', {}))
+        secondary_patched = results.get('secondary_final', results.get('secondary_patched', {}))
+
         col_bandit, col_secondary = st.columns(2)
         
         with col_bandit:
             st.markdown("#### Bandit Analysis")
-            if bandit_original.get('success'):
-                original_count = len(bandit_original.get('issues', []))
-                patched_count = len(bandit_patched.get('issues', []))
-                st.metric("Issues Identified (Source Code)", original_count)
-                st.metric("Issues Identified (Patched Code)", patched_count, delta=-(original_count - patched_count))
-                
-                if bandit_patched.get('summary'):
-                    severity = bandit_patched['summary'].get('severity_breakdown', {})
-                    st.write("Severity Breakdown (Patched):")
-                    for sev, count in severity.items():
-                        if count > 0:
-                            st.write(f"- {sev}: {count}")
-                
-                # Show detailed issues found by Bandit
-                if original_count > 0:
-                    with st.expander(f"🔍 View Bandit Issues in Original Code ({original_count})"):
-                        for idx, issue in enumerate(bandit_original.get('issues', []), 1):
-                            st.markdown(f"**{idx}. {issue.get('test_id', 'N/A')}: {issue.get('issue_text', 'No description')}**")
-                            st.markdown(f"- **Severity:** {issue.get('issue_severity', 'UNKNOWN')}")
-                            st.markdown(f"- **Confidence:** {issue.get('issue_confidence', 'UNKNOWN')}")
-                            st.markdown(f"- **Line:** {issue.get('line_number', 'N/A')}")
-                            if issue.get('code'):
-                                st.code(issue.get('code'), language='python')
-                            st.markdown("---")
+            original_count = len(bandit_original.get('issues', [])) if bandit_original.get('success') else 0
+            final_count = len(bandit_patched.get('issues', [])) if bandit_patched.get('success') else 0
+            bandit_total_identified = original_count + final_count
+            st.metric("Total Issues", bandit_total_identified)
+            if bandit_patched.get('success'):
+                patched_count = final_count
                 
                 if patched_count > 0:
-                    with st.expander(f"🔍 View Bandit Issues in Patched Code ({patched_count})"):
+                    # Get iteration code files for context lookup
+                    final_reports = results.get('final_reports', {})
+                    iteration_codes = final_reports.get('iteration_codes', {})
+                    
+                    with st.expander(f"🔍 View Bandit Issues - {patched_count}"):
                         for idx, issue in enumerate(bandit_patched.get('issues', []), 1):
-                            st.markdown(f"**{idx}. {issue.get('test_id', 'N/A')}: {issue.get('issue_text', 'No description')}**")
-                            st.markdown(f"- **Severity:** {issue.get('issue_severity', 'UNKNOWN')}")
-                            st.markdown(f"- **Confidence:** {issue.get('issue_confidence', 'UNKNOWN')}")
-                            st.markdown(f"- **Line:** {issue.get('line_number', 'N/A')}")
-                            if issue.get('code'):
-                                st.code(issue.get('code'), language='python')
+                            test_name = issue.get('test_name', issue.get('test_id', 'N/A'))
+                            issue_text = issue.get('issue_text', issue.get('description', ''))
+                            if not issue_text or issue_text == 'No description':
+                                issue_text = test_name
+                            st.markdown(f"**{idx}. {issue.get('test_id', 'N/A')}: {issue_text}**")
+                            # Severity/Confidence come from Bandit's static analysis output
+                            severity = issue.get('issue_severity') or issue.get('severity') or 'MEDIUM'
+                            confidence = issue.get('issue_confidence') or issue.get('confidence') or 'MEDIUM'
+                            st.markdown(f"- **Severity:** {severity}")
+                            st.markdown(f"- **Confidence:** {confidence}")
+                            line_num = issue.get('line_number')
+                            st.markdown(f"- **Line:** {line_num}")
+                            
+                            # Try to get code context from iteration file first
+                            code_context = ""
+                            if iteration_codes and line_num:
+                                # Use the last iteration file (most patched version)
+                                last_iteration = max(
+                                    [k for k in iteration_codes.keys() if k.startswith('iteration_')],
+                                    key=lambda x: int(x.split('_')[1]),
+                                    default=None
+                                )
+                                if last_iteration and last_iteration in iteration_codes:
+                                    iter_file = iteration_codes[last_iteration]
+                                    code_context = get_code_from_iteration_file(iter_file, line_num, context_lines=3)
+                            
+                            # Fallback to Bandit's provided code snippet if no iteration file context
+                            if code_context:
+                                st.code(code_context, language='python')
+                            elif issue.get('code'):
+                                code_snippet = issue.get('code', '')
+                                snippet_lines = code_snippet.split('\n')
+                                
+                                if len(snippet_lines) > 1 and line_num:
+                                    # Find which line in the snippet has the vulnerable line number
+                                    # Format is "19 sql = ..." (line number, space, then code)
+                                    vulnerable_line_index = None
+                                    for i, line in enumerate(snippet_lines):
+                                        # Check if line starts with the line number followed by space
+                                        if line.strip().startswith(f"{line_num} "):
+                                            vulnerable_line_index = i + 1  # Convert to 1-indexed
+                                            break
+                                    
+                                    if vulnerable_line_index is None:
+                                        # Fallback: if line number not found, assume last non-empty line
+                                        for i in range(len(snippet_lines) - 1, -1, -1):
+                                            if snippet_lines[i].strip():
+                                                vulnerable_line_index = i + 1
+                                                break
+                                    
+                                    # Format the snippet with arrow on vulnerable line
+                                    formatted_lines = []
+                                    for i, line in enumerate(snippet_lines):
+                                        if i + 1 == vulnerable_line_index:
+                                            formatted_lines.append("→ " + line)
+                                        else:
+                                            formatted_lines.append("  " + line)
+                                    
+                                    st.code('\n'.join(formatted_lines), language='python')
+                                else:
+                                    st.code(code_snippet, language='python')
                             st.markdown("---")
-                
-                # Show resolved issues
-                resolved_count = original_count - patched_count
-                if resolved_count > 0:
-                    st.success(f"✅ {resolved_count} Bandit issue(s) resolved by patching!")
+                else:
+                    st.success("✅ No issues found by Bandit!")
+            else:
+                st.error("❌ Bandit analysis failed")
         
         with col_secondary:
-            st.markdown("#### Pylint Analysis")
-            if secondary_original.get('success'):
-                original_count = len(secondary_original.get('issues', []))
-                patched_count = len(secondary_patched.get('issues', []))
-                st.metric("Issues Identified (Source Code)", original_count)
-                st.metric("Issues Identified (Patched Code)", patched_count, delta=-(original_count - patched_count))
-                
-                # Show detailed issues found by Pylint
-                if original_count > 0:
-                    with st.expander(f"🔍 View Pylint Issues in Original Code ({original_count})"):
-                        for idx, issue in enumerate(secondary_original.get('issues', []), 1):
-                            st.markdown(f"**{idx}. {issue.get('type', 'N/A')}: {issue.get('message', 'No description')}**")
-                            st.markdown(f"- **Symbol:** {issue.get('symbol', 'N/A')}")
-                            st.markdown(f"- **Line:** {issue.get('line', 'N/A')}")
-                            st.markdown("---")
+            st.markdown("#### Semgrep Analysis")
+            original_count = len(secondary_original.get('issues', [])) if secondary_original.get('success') else 0
+            final_count = len(secondary_patched.get('issues', [])) if secondary_patched.get('success') else 0
+            semgrep_total_identified = original_count + final_count
+            st.metric("Total Issue", semgrep_total_identified)
+            if secondary_patched.get('success'):
+                patched_count = final_count
                 
                 if patched_count > 0:
-                    with st.expander(f"🔍 View Pylint Issues in Patched Code ({patched_count})"):
-                        for idx, issue in enumerate(secondary_patched.get('issues', []), 1):
-                            st.markdown(f"**{idx}. {issue.get('type', 'N/A')}: {issue.get('message', 'No description')}**")
-                            st.markdown(f"- **Symbol:** {issue.get('symbol', 'N/A')}")
-                            st.markdown(f"- **Line:** {issue.get('line', 'N/A')}")
+                    with st.expander(f"🔍 View Semgrep Issues - {patched_count}"):
+                        # Get patched code from results
+                        patched_code = results.get('final_patched_code', results.get('patch_result', {}).get('patched_code', ''))
+                        
+                        # Debug info
+                        if not patched_code:
+                            st.warning("⚠️ Code is not available in results")
+                        
+                        # Group issues by (symbol, message_id, description)
+                        grouped_issues = {}
+                        for issue in secondary_patched.get('issues', []):
+                            key = (issue.get('symbol'), issue.get('message_id'), issue.get('description'), issue.get('type'))
+                            if key not in grouped_issues:
+                                grouped_issues[key] = []
+                            line_num = issue.get('line_number')
+                            if line_num is not None:
+                                grouped_issues[key].append(line_num)
+                        
+                        # Display grouped issues
+                        for idx, (key, lines) in enumerate(grouped_issues.items(), 1):
+                            symbol, msg_id, description, issue_type = key
+                            lines = sorted(set(lines))  # Remove duplicates and sort
+                            
+                            # Use description or fallback to symbol if description is missing
+                            display_name = description if description and description != 'Secondary Issue' else symbol
+                            st.markdown(f"**{idx}. {issue_type}: {display_name}**")
+                            st.markdown(f"- **Symbol:** {symbol}")
+                            st.markdown(f"- **Message ID:** {msg_id}")
+                            st.markdown(f"- **Lines:** {', '.join(map(str, lines))}")
+                            
+                            # Show code context for each unique line with arrow pointing to issue
+                            if patched_code and lines:
+                                for line_num in lines:
+                                    try:
+                                        context = get_code_context(patched_code, int(line_num), context_lines=2)
+                                        if context:
+                                            st.code(context, language='python')
+                                        else:
+                                            st.info(f"No code context available for line {line_num}")
+                                    except (ValueError, IndexError, TypeError) as e:
+                                        st.error(f"Error getting context for line {line_num}: {str(e)}")
+                            elif not patched_code:
+                                st.info("Code context unavailable - patched code not found in results")
+                            elif not lines:
+                                st.info("No valid line numbers found")
+                            
                             st.markdown("---")
-                
-                # Show resolved issues
-                resolved_count = original_count - patched_count
-                if resolved_count > 0:
-                    st.success(f"✅ {resolved_count} Pylint issue(s) resolved by patching!")
+                else:
+                    st.success("✅ No issues found by Semgrep!")
+            else:
+                st.error("❌ Semgrep analysis failed")
+
+        # Combined vulnerability table from original and all patched iterations
+        combined_issues = []
+
+        bandit_original = results.get('bandit_original', {})
         
+        # Add vulnerabilities from original code
+        if bandit_original.get('success'):
+            for issue in bandit_original.get('issues', []):
+                lines = issue.get('line_number')
+                line_list = [lines] if lines is not None else []
+                severity = issue.get('issue_severity') or issue.get('severity', 'UNKNOWN')
+                confidence = issue.get('issue_confidence') or issue.get('confidence', 'UNKNOWN')
+                combined_issues.append({
+                    'ID': issue.get('test_id', 'N/A'),
+                    'Name': issue.get('issue_text', issue.get('test_name', 'Bandit Issue')),
+                    'Severity': severity,
+                    'Confidence': confidence,
+                    'Occurrences': len(line_list) if line_list else 1,
+                    'Found In': 'Original Code',
+                    'Iteration': 'Original'
+                })
+
+        # Add vulnerabilities from patched code
+        if bandit_patched.get('success'):
+            for issue in bandit_patched.get('issues', []):
+                lines = issue.get('line_number')
+                line_list = [lines] if lines is not None else []
+                severity = issue.get('issue_severity') or issue.get('severity', 'UNKNOWN')
+                confidence = issue.get('issue_confidence') or issue.get('confidence', 'UNKNOWN')
+                # Bandit on patched code is from iteration 1 (first patching round)
+                combined_issues.append({
+                    'ID': issue.get('test_id', 'N/A'),
+                    'Name': issue.get('issue_text', issue.get('test_name', 'Bandit Issue')),
+                    'Severity': severity,
+                    'Confidence': confidence,
+                    'Occurrences': len(line_list) if line_list else 1,
+                    'Found In': 'Patched Code (Bandit)',
+                    'Iteration': '1'
+                })
+
+        # Add vulnerabilities from secondary tool (Semgrep) on patched code
+        if secondary_patched.get('success'):
+            for issue in secondary_patched.get('issues', []):
+                lines = issue.get('line_number')
+                line_list = lines if isinstance(lines, list) else ([lines] if lines is not None else [])
+                combined_issues.append({
+                    'ID': issue.get('message_id', issue.get('symbol', 'N/A')),
+                    'Name': issue.get('description', 'Secondary Issue'),
+                    'Severity': issue.get('type', issue.get('severity', 'UNKNOWN')),
+                    'Confidence': issue.get('confidence', issue.get('severity', 'UNKNOWN')),
+                    'Occurrences': len(line_list) if line_list else 1,
+                    'Found In': 'Patched Code (Semgrep)',
+                    'Iteration': '1'
+                })
+
+        if combined_issues:
+            st.markdown("### 🔴 Detected Vulnerabilities ")
+            # Add SL.No column and remove default index
+            df = pd.DataFrame(combined_issues)
+            df.insert(0, 'SL.No', range(1, len(df) + 1))
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
         # Get metrics early for use in cross-validation section
         metrics = results.get('metrics', {})
         
         # Tool Comparison and Cross-Validation
-        st.markdown("### 🔄 Tool Cross-Validation")
-        st.markdown("_Comparing what different tools detected in the analysis_")
+        st.markdown("### 🔄 Analysis Summary")
+        st.markdown("_Total vulnerabilities from all detection tools across all iterations_")
         
         col_compare1, col_compare2 = st.columns(2)
         
         with col_compare1:
-            with st.expander("📊 Tool Detection Comparison"):
-                st.markdown("**Detection Coverage:**")
-                custom_vuln_count = len(results.get('vulnerabilities_detected', []))
-                bandit_orig_count = len(bandit_original.get('issues', []))
-                pylint_orig_count = len(secondary_original.get('issues', []))
+            with st.expander("📊 Total Vulnerabilities Detected"):
+                st.markdown("**Across All Iterations (Custom Detector, Bandit, Semgrep):**")
+                total_detected = metrics.get('total_detected', 0)
+                custom_initial = metrics.get('custom_detector_initial', 0)
+                bandit_initial = metrics.get('bandit_initial', 0)
+                semgrep_initial = metrics.get('semgrep_initial', 0)
+                total_remaining = metrics.get('total_remaining', 0)
                 
-                st.write(f"- Custom Detector: **{custom_vuln_count}** vulnerabilities")
-                st.write(f"- Bandit: **{bandit_orig_count}** issues")
-                st.write(f"- Pylint: **{pylint_orig_count}** issues")
-                
-                if metrics.get('tool_comparison'):
-                    tool_comp = metrics['tool_comparison']
-                    overlap = tool_comp.get('overlapping_detections', 0)
-                    st.write(f"\n**Overlap:** {overlap} issues detected by multiple tools")
+                st.write(f"- Total detected: **{total_detected}** vulnerabilities")
+                st.write(f"- Custom Detector: **{custom_initial}**")
+                st.write(f"- Bandit: **{bandit_initial}**")
+                st.write(f"- Semgrep: **{semgrep_initial}**")
+                st.write(f"\n**Total Remaining: {total_remaining}**")
         
         with col_compare2:
             with st.expander("✅ Issues Resolved by Patching"):
-                custom_fixed = len(results.get('vulnerabilities_detected', [])) - len(results.get('patch_result', {}).get('unpatched_vulns', []))
-                bandit_fixed = len(bandit_original.get('issues', [])) - len(bandit_patched.get('issues', []))
-                pylint_fixed = len(secondary_original.get('issues', [])) - len(secondary_patched.get('issues', []))
+                total_fixed = metrics.get('total_fixed', 0)
                 
-                st.markdown("**Issues Fixed by Patching:**")
-                st.write(f"- Custom Detector vulnerabilities: **{custom_fixed}** fixed")
-                st.write(f"- Bandit issues: **{bandit_fixed}** fixed")
-                st.write(f"- Pylint issues: **{pylint_fixed}** fixed")
+                st.markdown("**Issues Fixed Across All Iterations:**")
+                st.write(f"- Total fixed by system: **{total_fixed}**")
+                
+                if total_detected > 0:
+                    fix_percentage = (total_fixed / total_detected) * 100
+                    st.metric("Overall Fix Rate", f"{fix_percentage:.1f}%")
+                else:
+                    st.metric("Overall Fix Rate", "N/A")
         
         # Metrics
         st.markdown("### 📊 Effectiveness Metrics")
@@ -647,7 +1133,7 @@ class App:
             comp_rows = [{
                 'Sl.No': 1,
                 'Bandit Issues': tool_comp.get('primary_tool_issues', 0),
-                'Pylint Issues': tool_comp.get('secondary_tool_issues', 0),
+                'Semgrep Issues': tool_comp.get('secondary_tool_issues', 0),
                 'Overlapping Detections': tool_comp.get('overlapping_detections', 0),
                 'Overlap Rate': f"{tool_comp.get('overlap_rate', 0):.1%}"
             }]
@@ -658,30 +1144,30 @@ class App:
         final_reports = results.get('final_reports', {})
         
         if final_reports:
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             
             with col1:
-                if 'initial_reports' in results:
-                    reports = results['initial_reports']
-                    if reports.get('csv_path'):
-                        st.markdown(f"📋 [Vulnerability Report (CSV)]({reports['csv_path']})")
-                    if reports.get('json_path'):
-                        st.markdown(f"📋 [Vulnerability Report (JSON)]({reports['json_path']})")
+                if final_reports.get('metrics') and os.path.exists(final_reports['metrics']):
+                    with open(final_reports['metrics'], 'rb') as f:
+                        st.download_button(
+                            label="📊 Download Metrics Report (HTML)",
+                            data=f.read(),
+                            file_name=os.path.basename(final_reports['metrics']),
+                            mime='text/html',
+                            key='download_metrics'
+                        )
             
             with col2:
-                if final_reports.get('patch_report'):
-                    patch_rep = final_reports['patch_report']
-                    if patch_rep.get('report_path'):
-                        st.markdown(f"🔧 [Patch Report]({patch_rep['report_path']})")
-                    if patch_rep.get('diff_path'):
-                        st.markdown(f"🔧 [Code Diff]({patch_rep['diff_path']})")
-            
-            with col3:
-                if final_reports.get('metrics'):
-                    st.markdown(f"📊 [Metrics Report]({final_reports['metrics']})")
-                if final_reports.get('html_summary'):
-                    st.markdown(f"📄 [HTML Summary]({final_reports['html_summary']})")
-
+                if final_reports.get('html_summary') and os.path.exists(final_reports['html_summary']):
+                    with open(final_reports['html_summary'], 'rb') as f:
+                        st.download_button(
+                            label="📄 Download Analysis Summary (HTML)",
+                            data=f.read(),
+                            file_name=os.path.basename(final_reports['html_summary']),
+                            mime='text/html',
+                            key='download_html'
+                        )
+        
     def run(self):
         self.render_api_input()
         if st.session_state.api_loaded:

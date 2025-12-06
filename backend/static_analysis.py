@@ -1,17 +1,39 @@
 """
-Static Analysis module: Runs Bandit and secondary tools (Pylint) for vulnerability detection.
+Static Analysis module: Runs Bandit and secondary tool (Semgrep) for vulnerability detection.
 """
 import subprocess
 import tempfile
 import json
 import os
+import re
 from typing import Dict, List
+
+
+def strip_markdown_code_fences(code: str) -> str:
+    """
+    Remove markdown code fences from code string.
+    
+    Args:
+        code: Code string that may contain markdown fences like ```python or ```
+    
+    Returns:
+        Clean code without markdown fences
+    """
+    # Remove opening fence with optional language specifier
+    code = re.sub(r'^```[\w]*\s*\n', '', code, flags=re.MULTILINE)
+    # Remove closing fence
+    code = re.sub(r'\n```\s*$', '', code, flags=re.MULTILINE)
+    # Also handle fences in the middle
+    code = re.sub(r'```[\w]*\s*\n', '', code)
+    code = re.sub(r'\n```', '', code)
+    
+    return code.strip()
 
 
 class StaticAnalyzer:
     """
     Runs static analysis tools on code to detect vulnerabilities.
-    Supports Bandit (primary) and Pylint (secondary).
+    Supports Bandit (primary) and Semgrep (secondary).
     """
     
     def __init__(self):
@@ -28,12 +50,12 @@ class StaticAnalyzer:
         except (subprocess.CalledProcessError, FileNotFoundError):
             tools['bandit'] = False
         
-        # Check Pylint
+        # Check Semgrep
         try:
-            subprocess.run(['pylint', '--version'], capture_output=True, check=True)
-            tools['pylint'] = True
+            subprocess.run(['semgrep', '--version'], capture_output=True, check=True)
+            tools['semgrep'] = True
         except (subprocess.CalledProcessError, FileNotFoundError):
-            tools['pylint'] = False
+            tools['semgrep'] = False
         
         return tools
     
@@ -55,6 +77,9 @@ class StaticAnalyzer:
                 'issues': [],
                 'summary': {}
             }
+        
+        # Strip markdown code fences if present
+        code = strip_markdown_code_fences(code)
         
         # Create temporary file if no path provided
         temp_file = None
@@ -166,124 +191,130 @@ class StaticAnalyzer:
         
         return confidence_counts
     
-    def run_pylint(self, code: str, code_path: str = None) -> Dict:
+    def run_semgrep(self, code: str, code_path: str = None, config: str = "auto") -> Dict:
         """
-        Run Pylint on the given code and return results.
+        Run Semgrep on the given code and return results.
         
         Args:
             code: Python code string to analyze
             code_path: Optional path to existing file
+            config: Semgrep config (default "auto" uses built-in rules). You can pass a ruleset or path.
         
         Returns:
             Dict with 'issues', 'summary', 'raw_output', and 'success'
         """
-        if not self.tools_available.get('pylint', False):
+        if not self.tools_available.get('semgrep', False):
             return {
                 'success': False,
-                'error': 'Pylint is not installed. Install with: pip install pylint',
+                'error': 'Semgrep is not installed. Install from https://semgrep.dev/docs/ or via pip/installer',
                 'issues': [],
                 'summary': {}
             }
-        
-        # Create temporary file if no path provided
+
+        code = strip_markdown_code_fences(code)
+
         temp_file = None
         if code_path is None:
             temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8')
             temp_file.write(code)
             temp_file.flush()
             code_path = temp_file.name
-        
+
         try:
-            # Run Pylint with JSON output
+            # Semgrep JSON output
             result = subprocess.run(
-                ['pylint', code_path, '--output-format=json', '--disable=C,R'],  # Disable convention and refactor
+                ['semgrep', '--json', '--config', config, code_path],
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=60
             )
-            
             output = result.stdout
-            
+
             try:
-                pylint_data = json.loads(output) if output.strip() else []
+                data = json.loads(output) if output.strip() else {}
             except json.JSONDecodeError:
                 return {
                     'success': False,
-                    'error': 'Failed to parse Pylint output',
+                    'error': 'Failed to parse Semgrep output',
                     'raw_output': output,
                     'issues': [],
                     'summary': {}
                 }
-            
-            # Extract issues (focus on errors and warnings)
-            issues = []
-            for item in pylint_data:
-                msg_type = item.get('type', '')
-                if msg_type in ['error', 'warning', 'fatal']:
-                    issues.append({
-                        'type': msg_type,
-                        'module': item.get('module'),
-                        'line_number': item.get('line'),
-                        'column': item.get('column'),
-                        'message_id': item.get('message-id'),
-                        'symbol': item.get('symbol'),
-                        'description': item.get('message'),
-                        'path': item.get('path')
-                    })
-            
-            # Create summary
-            type_counts = {}
-            for issue in issues:
-                issue_type = issue['type']
-                type_counts[issue_type] = type_counts.get(issue_type, 0) + 1
-            
+
+            findings = []
+            for r in data.get('results', []):
+                extra = r.get('extra', {})
+                severity = (extra.get('severity') or 'MEDIUM').upper()
+                # semgrep often includes metadata.cwe: ["CWE-089"]
+                meta = extra.get('metadata', {})
+                cwes = meta.get('cwe') or []
+                cwe_id = None
+                if isinstance(cwes, list) and cwes:
+                    first = str(cwes[0])
+                    if first.upper().startswith('CWE-'):
+                        cwe_id = first[4:]
+                    else:
+                        cwe_id = first
+
+                findings.append({
+                    'check_id': r.get('check_id'),
+                    'path': r.get('path'),
+                    'start': r.get('start', {}),
+                    'end': r.get('end', {}),
+                    'severity': severity,
+                    'message': extra.get('message') or '',
+                    'cwe_id': cwe_id,
+                })
+
             summary = {
-                'total_issues': len(issues),
-                'type_breakdown': type_counts
+                'total_issues': len(findings),
+                'severity_breakdown': {
+                    'HIGH': sum(1 for f in findings if f['severity'] == 'HIGH'),
+                    'MEDIUM': sum(1 for f in findings if f['severity'] == 'MEDIUM'),
+                    'LOW': sum(1 for f in findings if f['severity'] == 'LOW')
+                }
             }
-            
+
             return {
                 'success': True,
-                'issues': issues,
+                'issues': findings,
                 'summary': summary,
                 'raw_output': output
             }
-        
         except subprocess.TimeoutExpired:
             return {
                 'success': False,
-                'error': 'Pylint analysis timed out',
+                'error': 'Semgrep analysis timed out',
                 'issues': [],
                 'summary': {}
             }
         except Exception as e:
             return {
                 'success': False,
-                'error': f'Error running Pylint: {str(e)}',
+                'error': f'Error running Semgrep: {str(e)}',
                 'issues': [],
                 'summary': {}
             }
         finally:
-            # Clean up temporary file
             if temp_file:
                 try:
                     os.unlink(temp_file.name)
                 except:
                     pass
     
-    def run_secondary_tool(self, code: str, tool: str = 'pylint') -> Dict:
+    def run_secondary_tool(self, code: str, tool: str = 'semgrep') -> Dict:
         """
         Run a secondary static analyzer.
         
         Args:
             code: Python code to analyze
-            tool: Tool name ('pylint' is currently supported)
+            tool: Tool name ('semgrep' is currently supported)
         
         Returns:
             Analysis results dictionary
         """
-        if tool.lower() == 'pylint':
-            return self.run_pylint(code)
+        if tool.lower() == 'semgrep':
+            return self.run_semgrep(code)
         else:
             return {
                 'success': False,
@@ -305,7 +336,7 @@ class StaticAnalyzer:
         # Extract CWE IDs from both
         bandit_cwes = set(issue.get('cwe_id') for issue in bandit_issues if issue.get('cwe_id'))
         
-        # Map Pylint issues to approximate CWE categories (simplified)
+        # Map Semgrep issues to approximate CWE categories (simplified)
         secondary_lines = set(issue.get('line_number') for issue in secondary_issues)
         bandit_lines = set(issue.get('line_number') for issue in bandit_issues)
         
@@ -336,9 +367,9 @@ def run_bandit(code_path: str) -> dict:
 
 def run_secondary_tool(code_path: str) -> dict:
     """
-    Run a secondary static analyzer (Pylint) and return results.
+    Run a secondary static analyzer (Semgrep) and return results.
     """
     analyzer = StaticAnalyzer()
     with open(code_path, 'r', encoding='utf-8') as f:
         code = f.read()
-    return analyzer.run_pylint(code, code_path)
+    return analyzer.run_semgrep(code, code_path)
