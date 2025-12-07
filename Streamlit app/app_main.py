@@ -921,52 +921,49 @@ class App:
                     'Line Number': line_num
                 })
 
+        # Bandit table (if any)
         if combined_issues:
             st.markdown("### 🔴 Detected Vulnerabilities - Bandit")
             st.info("ℹ️ This table shows the vulnerabilities identified by Bandit tool in the initial source code. For patching iteration verbosity, please refer to the report section.")
-            # Add SL.No column and remove default index
             df = pd.DataFrame(combined_issues)
             df.insert(0, 'SL.No', range(1, len(df) + 1))
             st.dataframe(df, use_container_width=True, hide_index=True)
-            
-            # Display Semgrep issues table below Detected Vulnerabilities
-            if semgrep_original_count > 0:
-                st.info("ℹ️ This table shows the vulnerabilities identified by Semgrep tool in the initial source code. For patching iteration verbosity, please refer to the report section.")
-                semgrep_issues_data = []
-                for idx, issue in enumerate(secondary_original.get('issues', []), 1):
-                    # Get line number from start or end position
-                    line_num = 'Unknown'
-                    if 'start' in issue:
-                        line_num = issue['start'].get('line', 'Unknown')
-                    elif 'end' in issue:
-                        line_num = issue['end'].get('line', 'Unknown')
-                    elif 'line_number' in issue:
-                        line_num = issue.get('line_number', 'Unknown')
-                    
-                    cwe_raw = issue.get('cwe_id', 'N/A')
-                    cwe_id, cwe_name = parse_cwe_info(cwe_raw)
-                    
-                    # Build row with available fields (without Type column)
-                    row = {
-                        'SL.No': idx,
-                        'CWE ID': cwe_id,
-                        'CWE Name': cwe_name,
-                        'Line Number': line_num
-                    }
-                    
-                    # Add severity if available
-                    if 'severity' in issue:
-                        row['Type'] = issue.get('severity', 'UNKNOWN')
-                    
-                    # Add confidence if available
-                    if 'confidence' in issue:
-                        row['Confidence'] = issue.get('confidence', 'UNKNOWN')
-                    
-                    semgrep_issues_data.append(row)
-                
-                # Display table with available columns
-                if semgrep_issues_data:
-                    st.dataframe(pd.DataFrame(semgrep_issues_data), use_container_width=True, hide_index=True)
+        else:
+            st.info("ℹ️ No vulnerabilities identified by Bandit in the initial source code.")
+
+        # Semgrep table (always show when available)
+        if semgrep_original_count > 0:
+            st.info("ℹ️ This table shows the vulnerabilities identified by Semgrep tool in the initial source code. For patching iteration verbosity, please refer to the report section.")
+            semgrep_issues_data = []
+            for idx, issue in enumerate(secondary_original.get('issues', []), 1):
+                line_num = 'Unknown'
+                if 'start' in issue:
+                    line_num = issue['start'].get('line', 'Unknown')
+                elif 'end' in issue:
+                    line_num = issue['end'].get('line', 'Unknown')
+                elif 'line_number' in issue:
+                    line_num = issue.get('line_number', 'Unknown')
+
+                cwe_raw = issue.get('cwe_id', 'N/A')
+                cwe_id, cwe_name = parse_cwe_info(cwe_raw)
+
+                row = {
+                    'SL.No': idx,
+                    'CWE ID': cwe_id,
+                    'CWE Name': cwe_name,
+                    'Line Number': line_num
+                }
+
+                if 'severity' in issue:
+                    row['Severity'] = issue.get('severity', 'UNKNOWN')
+
+                if 'confidence' in issue:
+                    row['Confidence'] = issue.get('confidence', 'UNKNOWN')
+
+                semgrep_issues_data.append(row)
+
+            if semgrep_issues_data:
+                st.dataframe(pd.DataFrame(semgrep_issues_data), use_container_width=True, hide_index=True)
 
         # Get metrics early for use in cross-validation section
         metrics = results.get('metrics', {})
