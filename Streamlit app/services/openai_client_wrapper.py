@@ -3,10 +3,25 @@ from openai import OpenAI
 # Maximum tokens allowed for response
 MAX_RESPONSE_TOKENS_DEFAULT = 5000
 
+
 class OpenAIClientWrapper:
     """
     Wrapper around the OpenAI API with strict restrictions:
     """
+
+    @staticmethod
+    def validate_api_key(api_key: str) -> bool:
+        """
+        Validate the OpenAI API key by making a minimal API call.
+        Returns True if valid, False otherwise.
+        """
+        try:
+            client = OpenAI(api_key=api_key.strip())
+            # Minimal call: list models (safe, fast, doesn't use tokens)
+            _ = client.models.list()
+            return True
+        except Exception:
+            return False
 
     def __init__(self, api_key: str):
         if not api_key or not api_key.strip():
