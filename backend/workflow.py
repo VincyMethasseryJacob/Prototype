@@ -23,15 +23,17 @@ class VulnerabilityAnalysisWorkflow:
     
     Workflow Steps:
     1. Preprocessing: Clean and normalize generated code
-    2. Vulnerability Detection: Detect vulnerabilities using multiple strategies
+    2. Vulnerability Detection: Detect vulnerabilities using custom detector
     3. Explainability: Generate explanations for each vulnerability
-    4. Patching: Generate secure patched code
-    5. Static Analysis (Bandit): Validate with primary security tool
-    6. Cross-validation (Semgrep): Validate with secondary tool
-    7. Iterative Repair: Repeat patching if needed, incorporating all tool findings
-    8. Final Static Analysis: Record final validation results
-    9. Metrics: Calculate effectiveness metrics
-    10. Final Reporting: Generate comprehensive reports
+    4. Initial Patching: Generate secure patched code for detected vulnerabilities
+    5. Multi-Tool Analysis: Analyze initial patched code with custom detector, Bandit, and Semgrep
+    6. Iterative Repair: If any tool finds vulnerabilities, start iteration loop:
+       - Iteration 1: Patch code with all vulnerabilities found in step 5
+       - Iteration 2+: Re-analyze patched code with all three tools, patch if needed
+       - Continue until all tools report 0 vulnerabilities or max iterations reached
+    7. Final Static Analysis: Record final validation results from all tools
+    8. Metrics: Calculate effectiveness metrics
+    9. Final Reporting: Generate comprehensive reports
     """
     
     def __init__(
@@ -103,12 +105,51 @@ class VulnerabilityAnalysisWorkflow:
         results['bandit_original'] = bandit_original
         results['semgrep_original'] = semgrep_original
 
-        # Initialize accumulator of all findings across iterations
+        # Initialize accumulators for tracking vulnerabilities across all phases
+        # Initial code findings (raw counts - no dedup)
+        bandit_initial_converted = self._convert_bandit_to_vulns(bandit_original.get('issues', []) if bandit_original.get('success') else [], cleaned_code)
+        semgrep_initial_converted = self._convert_semgrep_to_vulns(semgrep_original.get('issues', []) if semgrep_original.get('success') else [], cleaned_code)
+        
+        # Store initial code raw counts per tool
+        initial_custom_count = len(vulnerabilities)
+        initial_bandit_count = len(bandit_initial_converted)
+        initial_semgrep_count = len(semgrep_initial_converted)
+        initial_total_count = initial_custom_count + initial_bandit_count + initial_semgrep_count
+        
+        results['initial_custom_count'] = initial_custom_count
+        results['initial_bandit_count'] = initial_bandit_count
+        results['initial_semgrep_count'] = initial_semgrep_count
+        results['initial_total_count'] = initial_total_count
+        
+        # All findings accumulator (across initial + iterations)
         all_found_vulns: List[Dict] = []
         all_found_vulns.extend(vulnerabilities)
-        all_found_vulns.extend(self._convert_bandit_to_vulns(bandit_original.get('issues', []) if bandit_original.get('success') else [], cleaned_code))
-        all_found_vulns.extend(self._convert_semgrep_to_vulns(semgrep_original.get('issues', []) if semgrep_original.get('success') else [], cleaned_code))
+        all_found_vulns.extend(bandit_initial_converted)
+        all_found_vulns.extend(semgrep_initial_converted)
         results['all_found_vulns_initial'] = list(all_found_vulns)
+        # Store all occurrences (not deduped) for UI
+        results['all_found_vulns_occurrences'] = list(all_found_vulns)
+        
+        # Calculate initial code findings (deduplicated by CWE + line)
+        initial_code_deduped = self._deduplicate_vulns_by_line([vulnerabilities, bandit_initial_converted, semgrep_initial_converted])
+        results['initial_code_deduped_count'] = len(initial_code_deduped)
+        results['initial_code_deduped'] = initial_code_deduped
+        
+        # Debug: Print found items before dedup
+        print(f"\n📊 DEBUG - Initial Code Deduplication:")
+        print(f"   Custom detector found: {len(vulnerabilities)} items")
+        if vulnerabilities:
+            for v in vulnerabilities[:3]:
+                print(f"      - CWE-{v.get('cwe_id')}, line {v.get('line_number', v.get('line'))}")
+        print(f"   Bandit found: {len(bandit_initial_converted)} items")
+        if bandit_initial_converted:
+            for v in bandit_initial_converted[:3]:
+                print(f"      - CWE-{v.get('cwe_id')}, line {v.get('line', v.get('line_number'))}")
+        print(f"   Semgrep found: {len(semgrep_initial_converted)} items")
+        if semgrep_initial_converted:
+            for v in semgrep_initial_converted[:3]:
+                print(f"      - CWE-{v.get('cwe_id')}, line {v.get('line', v.get('line_number'))}")
+        print(f"   After deduplication by (CWE, line): {len(initial_code_deduped)} unique items")
         
         if not vulnerabilities and not all_found_vulns:
             print("✅ No vulnerabilities detected by any tool on original code!")
@@ -160,54 +201,64 @@ class VulnerabilityAnalysisWorkflow:
         vulnerabilities = self._step_explainability(vulnerabilities)
         results['vulnerabilities_with_explanations'] = vulnerabilities
         
-        # Step 4: Patching
-        print("\n🔧 Step 4: Generating patches...")
+        # Step 4: Initial Patching
+        print("\n🔧 Step 4: Generating initial patch...")
         patch_result = self._step_patching(cleaned_code, vulnerabilities)
-        results['patch_result'] = patch_result
-        
-        # Step 5: Static Analysis on Patched Code (Bandit)
-        print("\n🔬 Step 5: Running Bandit analysis on patched code...")
-        bandit_patched = self._step_static_analysis_bandit(patch_result['patched_code'])
-        results['bandit_patched'] = bandit_patched
-        
-        # Step 6: Static Analysis on Patched Code (Semgrep)
-        print("\n🔍 Step 6: Running Semgrep analysis on patched code...")
-        secondary_patched = self._step_static_analysis_secondary(patch_result['patched_code'])
-        results['secondary_patched'] = secondary_patched
-        
-        # Step 7: Iterative Repair (if needed)
-        print("\n🔄 Step 7: Checking if additional patching needed...")
+        results['initial_patch_result'] = patch_result
         current_code = patch_result['patched_code']
-        all_iterations = [patch_result]
-        bandit_final = bandit_patched
-        secondary_final = secondary_patched
         
-        # Start from 2 since we already have iteration 1 (initial patch)
-        for iteration_count in range(2, self.max_patch_iterations + 1):
-            # Check all three detection methods
-            remaining_vulns = self._detect_remaining_vulnerabilities(current_code)
-            bandit_issues = bandit_final.get('issues', []) if bandit_final.get('success') else []
-            semgrep_issues = secondary_final.get('issues', []) if secondary_final.get('success') else []
+        # Step 5: Analyze Initial Patched Code with All Three Tools
+        print("\n🔬 Step 5: Analyzing initial patched code with all tools...")
+        print("   Running Custom detector...")
+        remaining_vulns_custom = self._detect_remaining_vulnerabilities(current_code)
+        
+        print("   Running Bandit...")
+        bandit_result = self._step_static_analysis_bandit(current_code)
+        bandit_issues = bandit_result.get('issues', []) if bandit_result.get('success') else []
+        
+        print("   Running Semgrep...")
+        semgrep_result = self._step_static_analysis_secondary(current_code)
+        semgrep_issues = semgrep_result.get('issues', []) if semgrep_result.get('success') else []
+        
+        # Convert tool results to vulnerability format
+        bandit_vulns = self._convert_bandit_to_vulns(bandit_issues, current_code)
+        semgrep_vulns = self._convert_semgrep_to_vulns(semgrep_issues, current_code)
+        
+        # Calculate total issues found
+        total_issues = len(remaining_vulns_custom) + len(bandit_issues) + len(semgrep_issues)
+        
+        print(f"\n   Analysis Results on Initial Patched Code:")
+        print(f"   - Custom detector: {len(remaining_vulns_custom)} vulnerabilities")
+        print(f"   - Bandit: {len(bandit_issues)} issues")
+        print(f"   - Semgrep: {len(semgrep_issues)} issues")
+        print(f"   - Total: {total_issues} issues")
+        
+        # Step 6: Iterative Repair (if needed)
+        all_iterations = []
+        iteration_findings = []
+        iteration_custom_count = 0  # Track iterations custom detector findings
+        iteration_bandit_count = 0   # Track iterations bandit findings
+        iteration_semgrep_count = 0  # Track iterations semgrep findings
+        bandit_final = bandit_result
+        secondary_final = semgrep_result
+        
+        if total_issues == 0:
+            print("\n✅ Initial patch successful - no vulnerabilities found by any tool!")
+            results['patch_iterations'] = all_iterations
+            results['total_iterations'] = 0
+            results['final_patched_code'] = current_code
+        else:
+            print("\n🔄 Step 6: Starting iterative repair process...")
+            print(f"🔄 Iteration 1: {total_issues} issues detected in initial patched code")
             
-            total_issues = len(remaining_vulns) + len(bandit_issues) + len(semgrep_issues)
-            
-            if total_issues == 0:
-                print(f"✅ All vulnerabilities fixed after {iteration_count - 1} iteration(s)!")
-                print(f"   - Custom detector: 0 vulnerabilities")
-                print(f"   - Bandit: 0 issues")
-                print(f"   - Semgrep: 0 issues")
-                break
-            
-            print(f"🔄 Iteration {iteration_count}: {total_issues} total issues found")
-            print(f"   - Custom detector: {len(remaining_vulns)} vulnerabilities")
-            if remaining_vulns:
-                for vuln in remaining_vulns:
+            # Display details for iteration 1
+            if remaining_vulns_custom:
+                for vuln in remaining_vulns_custom:
                     cwe_id = vuln.get('cwe_id', 'Unknown')
                     cwe_name = vuln.get('cwe_name', 'Unknown')
                     line = vuln.get('line_number', vuln.get('line', 'Unknown'))
                     print(f"      • CWE-{cwe_id} ({cwe_name}) at line {line}")
             
-            print(f"   - Bandit: {len(bandit_issues)} issues")
             if bandit_issues:
                 for issue in bandit_issues:
                     test_id = issue.get('test_id', 'Unknown')
@@ -216,40 +267,35 @@ class VulnerabilityAnalysisWorkflow:
                     severity = issue.get('severity', 'Unknown')
                     print(f"      • {test_id} ({test_name}) at line {line} [{severity}]")
             
-            print(f"   - Semgrep: {len(semgrep_issues)} issues")
             if semgrep_issues:
                 for issue in semgrep_issues:
                     check_id = issue.get('check_id', 'Unknown')
                     message = issue.get('message', 'No description')
                     line = issue.get('start', {}).get('line', issue.get('end', {}).get('line', 'Unknown'))
                     severity = issue.get('severity', 'Unknown')
-                    # Truncate long messages
                     if len(message) > 60:
                         message = message[:57] + "..."
                     print(f"      • {check_id}: {message} at line {line} [{severity}]")
             
-            # Convert Bandit issues to vulnerability format for patching
-            bandit_vulns = self._convert_bandit_to_vulns(bandit_issues, current_code)
+            # Combine all vulnerabilities for iteration 1
+            all_vulns = remaining_vulns_custom + bandit_vulns + semgrep_vulns
             
-            # Convert Semgrep issues to vulnerability format for patching
-            semgrep_vulns = self._convert_semgrep_to_vulns(semgrep_issues, current_code)
-            
-            # Combine all vulnerabilities
-            all_vulns = remaining_vulns + bandit_vulns + semgrep_vulns
-
-            # Accumulate all found in this iteration
-            all_found_vulns.extend(remaining_vulns)
+            # Accumulate findings across all iterations
+            iteration_findings.extend(remaining_vulns_custom)
+            iteration_findings.extend(bandit_vulns)
+            iteration_findings.extend(semgrep_vulns)
+            all_found_vulns.extend(remaining_vulns_custom)
             all_found_vulns.extend(bandit_vulns)
             all_found_vulns.extend(semgrep_vulns)
             
-            if not all_vulns:
-                print("✅ No vulnerabilities to patch!")
-                break
+            # Track per-tool counts for iterations
+            iteration_custom_count += len(remaining_vulns_custom)
+            iteration_bandit_count += len(bandit_vulns)
+            iteration_semgrep_count += len(semgrep_vulns)
             
-            # Patch again with all detected issues
-            # Store per-iteration custom detector findings for UI
+            # Store custom detector findings for UI
             iteration_custom_vulns = {}
-            for vuln in remaining_vulns:
+            for vuln in remaining_vulns_custom:
                 cwe_id = vuln.get('cwe_id', 'Unknown')
                 cwe_name = vuln.get('cwe_name', 'Unknown')
                 line = vuln.get('line_number', vuln.get('line', 'Unknown'))
@@ -263,28 +309,134 @@ class VulnerabilityAnalysisWorkflow:
                     }
                 iteration_custom_vulns[key]['lines'].append(line)
                 iteration_custom_vulns[key]['explanations'].append(vuln.get('explanation', ''))
-            # Attach to iteration result for UI
-            iteration_result = self._step_patching(current_code, all_vulns)
-            iteration_result['custom_detector_vulns'] = iteration_custom_vulns
-            all_iterations.append(iteration_result)
-            current_code = iteration_result['patched_code']
             
-            # Re-run static analysis on new patched code
-            bandit_final = self._step_static_analysis_bandit(current_code)
-            secondary_final = self._step_static_analysis_secondary(current_code)
+            # Create iteration 1 result by patching with all detected vulnerabilities
+            iteration_1_result = self._step_patching(current_code, all_vulns)
+            iteration_1_result['iteration_number'] = 1
+            iteration_1_result['custom_detector_vulns'] = iteration_custom_vulns
+            iteration_1_result['bandit_analysis'] = bandit_result
+            iteration_1_result['semgrep_analysis'] = semgrep_result
+            all_iterations.append(iteration_1_result)
+            current_code = iteration_1_result['patched_code']
+            
+            # Continue with subsequent iterations (2 to max)
+            for iteration_count in range(2, self.max_patch_iterations + 1):
+                # Re-run static analysis on current patched code
+                bandit_final = self._step_static_analysis_bandit(current_code)
+                secondary_final = self._step_static_analysis_secondary(current_code)
+                
+                # Check all three detection methods
+                remaining_vulns = self._detect_remaining_vulnerabilities(current_code)
+                bandit_issues = bandit_final.get('issues', []) if bandit_final.get('success') else []
+                semgrep_issues = secondary_final.get('issues', []) if secondary_final.get('success') else []
+                
+                total_issues = len(remaining_vulns) + len(bandit_issues) + len(semgrep_issues)
+                
+                if total_issues == 0:
+                    print(f"✅ All vulnerabilities fixed after {iteration_count - 1} iteration(s)!")
+                    print(f"   - Custom detector: 0 vulnerabilities")
+                    print(f"   - Bandit: 0 issues")
+                    print(f"   - Semgrep: 0 issues")
+                    break
+                
+                print(f"🔄 Iteration {iteration_count}: {total_issues} total issues found")
+                print(f"   - Custom detector: {len(remaining_vulns)} vulnerabilities")
+                if remaining_vulns:
+                    for vuln in remaining_vulns:
+                        cwe_id = vuln.get('cwe_id', 'Unknown')
+                        cwe_name = vuln.get('cwe_name', 'Unknown')
+                        line = vuln.get('line_number', vuln.get('line', 'Unknown'))
+                        print(f"      • CWE-{cwe_id} ({cwe_name}) at line {line}")
+                
+                print(f"   - Bandit: {len(bandit_issues)} issues")
+                if bandit_issues:
+                    for issue in bandit_issues:
+                        test_id = issue.get('test_id', 'Unknown')
+                        test_name = issue.get('test_name', 'Unknown')
+                        line = issue.get('line_number', 'Unknown')
+                        severity = issue.get('severity', 'Unknown')
+                        print(f"      • {test_id} ({test_name}) at line {line} [{severity}]")
+                
+                print(f"   - Semgrep: {len(semgrep_issues)} issues")
+                if semgrep_issues:
+                    for issue in semgrep_issues:
+                        check_id = issue.get('check_id', 'Unknown')
+                        message = issue.get('message', 'No description')
+                        line = issue.get('start', {}).get('line', issue.get('end', {}).get('line', 'Unknown'))
+                        severity = issue.get('severity', 'Unknown')
+                        # Truncate long messages
+                        if len(message) > 60:
+                            message = message[:57] + "..."
+                        print(f"      • {check_id}: {message} at line {line} [{severity}]")
+                
+                # Convert Bandit issues to vulnerability format for patching
+                bandit_vulns = self._convert_bandit_to_vulns(bandit_issues, current_code)
+                
+                # Convert Semgrep issues to vulnerability format for patching
+                semgrep_vulns = self._convert_semgrep_to_vulns(semgrep_issues, current_code)
+                
+                # Combine all vulnerabilities
+                all_vulns = remaining_vulns + bandit_vulns + semgrep_vulns
+
+                # Accumulate all found in this iteration (for iteration-only count)
+                iteration_findings.extend(remaining_vulns)
+                iteration_findings.extend(bandit_vulns)
+                iteration_findings.extend(semgrep_vulns)
+                
+                # Accumulate all found in this iteration (for total count with initial)
+                all_found_vulns.extend(remaining_vulns)
+                all_found_vulns.extend(bandit_vulns)
+                all_found_vulns.extend(semgrep_vulns)
+                
+                # Track per-tool counts for iterations
+                iteration_custom_count += len(remaining_vulns)
+                iteration_bandit_count += len(bandit_vulns)
+                iteration_semgrep_count += len(semgrep_vulns)
+                
+                if not all_vulns:
+                    print("✅ No vulnerabilities to patch!")
+                    break
+                
+                # Patch again with all detected issues
+                # Store per-iteration custom detector findings for UI
+                iteration_custom_vulns = {}
+                for vuln in remaining_vulns:
+                    cwe_id = vuln.get('cwe_id', 'Unknown')
+                    cwe_name = vuln.get('cwe_name', 'Unknown')
+                    line = vuln.get('line_number', vuln.get('line', 'Unknown'))
+                    key = (cwe_id, cwe_name)
+                    if key not in iteration_custom_vulns:
+                        iteration_custom_vulns[key] = {
+                            'cwe_id': cwe_id,
+                            'cwe_name': cwe_name,
+                            'lines': [],
+                            'explanations': []
+                        }
+                    iteration_custom_vulns[key]['lines'].append(line)
+                    iteration_custom_vulns[key]['explanations'].append(vuln.get('explanation', ''))
+                # Attach to iteration result for UI
+                iteration_result = self._step_patching(current_code, all_vulns)
+                iteration_result['iteration_number'] = iteration_count
+                iteration_result['custom_detector_vulns'] = iteration_custom_vulns
+                all_iterations.append(iteration_result)
+                current_code = iteration_result['patched_code']
+                
+                # Store per-iteration static analysis results in the iteration result
+                all_iterations[-1]['bandit_analysis'] = bandit_final
+                all_iterations[-1]['semgrep_analysis'] = secondary_final
         
-        # Determine the actual iteration count (last iteration executed)
-        results['total_iterations'] = len(all_iterations)
-        results['patch_iterations'] = all_iterations
-        results['final_patched_code'] = current_code
+            # After iteration loop completes
+            results['total_iterations'] = len(all_iterations)
+            results['patch_iterations'] = all_iterations
+            results['final_patched_code'] = current_code
         
-        # Step 8: Final Static Analysis (use latest results from loop)
-        print("\n🔬 Step 8: Recording final static analysis results...")
+        # Step 7: Final Static Analysis (use latest results from loop)
+        print("\n🔬 Step 7: Recording final static analysis results...")
         results['bandit_final'] = bandit_final
         results['secondary_final'] = secondary_final
         
-        # Step 9: Evaluation and Metrics
-        print("\n📈 Step 9: Calculating metrics...")
+        # Step 8: Evaluation and Metrics
+        print("\n📈 Step 8: Calculating metrics...")
         # Combine vulnerabilities from all three tools
         bandit_final_vulns = self._convert_bandit_to_vulns(
             bandit_final.get('issues', []) if bandit_final.get('success') else [],
@@ -296,14 +448,31 @@ class VulnerabilityAnalysisWorkflow:
         )
         
         # Remaining vulnerabilities = custom detector + Bandit + Semgrep on final patched code
-        total_remaining_vulns = all_iterations[-1]['unpatched_vulns'] + bandit_final_vulns + semgrep_final_vulns
+        if all_iterations:
+            total_remaining_vulns_raw = all_iterations[-1]['unpatched_vulns'] + bandit_final_vulns + semgrep_final_vulns
+        else:
+            # No iterations needed, check final code
+            final_custom_vulns = self._detect_remaining_vulnerabilities(current_code)
+            total_remaining_vulns_raw = final_custom_vulns + bandit_final_vulns + semgrep_final_vulns
+        # Deduplicate remaining vulnerabilities by (CWE, line) for consistency
+        total_remaining_vulns = self._deduplicate_vulns_by_line([total_remaining_vulns_raw])
 
-        # Add final detections to all_found accumulator
-        all_found_vulns.extend(bandit_final_vulns)
-        all_found_vulns.extend(semgrep_final_vulns)
+        # NOTE: Do NOT add final bandit/semgrep findings to all_found_vulns again
+        # They are already included from iterations or initial findings
+        # all_found_vulns already contains complete totals
         
-        # Deduplicate all_found_vulns based on CWE + line + detection method
-        # This prevents counting the same vulnerability multiple times across iterations
+        # Calculate iterations-only findings (excluding initial code)
+        # Deduplicate iteration findings by (CWE + line) - vulnerabilities found during patch iterations only
+        iterations_only_deduped = self._deduplicate_vulns_by_line([iteration_findings])
+        results['all_iterations_deduped_count'] = len(iterations_only_deduped)
+        results['all_iterations_deduped'] = iterations_only_deduped
+        print(f"📊 DEBUG Iterations Only Deduped Count: {len(iterations_only_deduped)} (total before dedup: {len(iteration_findings)})")
+        
+        # Calculate all findings (initial + iterations) for total detected metric
+        all_findings_deduped = self._deduplicate_vulns_by_line([all_found_vulns])
+        print(f"📊 DEBUG All Findings Deduped Count: {len(all_findings_deduped)} (total before dedup: {len(all_found_vulns)})")
+        
+        # Keep unique_found_vulns for backward compatibility with other code
         seen_vulns = set()
         unique_found_vulns = []
         for vuln in all_found_vulns:
@@ -315,15 +484,72 @@ class VulnerabilityAnalysisWorkflow:
             if vuln_key not in seen_vulns:
                 seen_vulns.add(vuln_key)
                 unique_found_vulns.append(vuln)
-        
         results['all_found_vulns_total'] = unique_found_vulns
+        # Raw counts (no dedup) for display
+        results['total_vulns_found_all_occurrences'] = len(all_found_vulns)
+        results['total_iterations_all_occurrences'] = len(iteration_findings)
+        
+        # Store per-tool counts for both initial and iterations
+        results['iteration_custom_count'] = iteration_custom_count
+        results['iteration_bandit_count'] = iteration_bandit_count
+        results['iteration_semgrep_count'] = iteration_semgrep_count
+        
+        # Overall totals per tool (initial + iterations)
+        results['total_custom_count'] = initial_custom_count + iteration_custom_count
+        results['total_bandit_count'] = initial_bandit_count + iteration_bandit_count
+        results['total_semgrep_count'] = initial_semgrep_count + iteration_semgrep_count
+        # For UI: show total found and fixed
+        # Vulnerabilities fixed = total unique found - remaining unique in final code
+        results['total_vulns_found'] = len(unique_found_vulns)
+        results['total_vulns_remaining'] = len(total_remaining_vulns)
+        results['total_vulns_fixed'] = max(0, len(unique_found_vulns) - len(total_remaining_vulns))
+        
+        # Aggregate Bandit issues across original + all iterations
+        all_bandit_issues = list(bandit_original.get('issues', [])) if bandit_original.get('success') else []
+        all_semgrep_issues = list(semgrep_original.get('issues', [])) if semgrep_original.get('success') else []
+        
+        for iteration in all_iterations:
+            bandit_analysis = iteration.get('bandit_analysis', {})
+            semgrep_analysis = iteration.get('semgrep_analysis', {})
+            
+            if bandit_analysis.get('success'):
+                all_bandit_issues.extend(bandit_analysis.get('issues', []))
+            
+            if semgrep_analysis.get('success'):
+                all_semgrep_issues.extend(semgrep_analysis.get('issues', []))
+        
+        # Create aggregated tool results for comparison
+        bandit_aggregated = {
+            'success': True,
+            'issues': all_bandit_issues
+        }
+        semgrep_aggregated = {
+            'success': True,
+            'issues': all_semgrep_issues
+        }
         
         metrics = self._step_calculate_metrics(
-            unique_found_vulns,
+            all_findings_deduped,  # Use all findings (initial + iterations) deduplicated by line only
             total_remaining_vulns,
-            bandit_final,
-            secondary_final
+            bandit_aggregated,
+            semgrep_aggregated,
+            results.get('initial_code_deduped_count', 0),
+            results.get('all_iterations_deduped_count', 0)
         )
+        # Add raw occurrence counts (no deduplication) for UI
+        metrics['total_detected_all_occurrences'] = len(all_found_vulns)
+        metrics['iterations_total_all_occurrences'] = len(iteration_findings)
+        # Per-tool raw totals (all occurrences, no dedup) - sum of initial + iterations for each tool
+        metrics['custom_detector_total_all_occurrences'] = initial_custom_count + iteration_custom_count
+        metrics['bandit_total_all_occurrences'] = initial_bandit_count + iteration_bandit_count
+        metrics['semgrep_total_all_occurrences'] = initial_semgrep_count + iteration_semgrep_count
+        print(f"📊 DEBUG Metrics Before Setting:")
+        print(f"   initial_code_deduped_count from results: {results.get('initial_code_deduped_count')}")
+        print(f"   all_iterations_deduped_count from results: {results.get('all_iterations_deduped_count')}")
+        print(f"📊 DEBUG Metrics After Calculate:")
+        print(f"   initial_code_deduped_count in metrics: {metrics.get('initial_code_deduped_count')}")
+        print(f"   all_iterations_deduped_count in metrics: {metrics.get('all_iterations_deduped_count')}")
+        print(f"   total_detected in metrics: {metrics.get('total_detected')}")
         # Tool-wise detected counts across all iterations (deduped)
         bandit_detected = len([v for v in unique_found_vulns if v.get('detection_method') == 'bandit'])
         semgrep_detected = len([v for v in unique_found_vulns if v.get('detection_method') == 'semgrep'])
@@ -331,22 +557,28 @@ class VulnerabilityAnalysisWorkflow:
         metrics['semgrep_initial'] = semgrep_detected
         results['metrics'] = metrics
         
-        # Step 10: Final Reporting
-        print("\n📄 Step 10: Generating final reports...")
+        # Step 9: Final Reporting
+        print("\n📄 Step 9: Generating final reports...")
         final_reports = self._step_final_reporting(
             results,
             workflow_id
         )
         results['final_reports'] = final_reports
         
-        # Determine overall status
-        if not all_iterations[-1]['unpatched_vulns']:
-            results['status'] = 'fully_patched'
-            print("\n✅ Workflow completed successfully - all vulnerabilities patched!")
+        # Determine overall status and set UI info flag
+        if all_iterations:
+            if not all_iterations[-1]['unpatched_vulns']:
+                results['status'] = 'fully_patched'
+                results['show_patch_info_message'] = False
+                print("\n✅ Workflow completed successfully - all vulnerabilities patched!")
+            else:
+                results['status'] = 'partially_patched'
+                results['show_patch_info_message'] = True
+                print(f"\n⚠️  Workflow completed - {len(all_iterations[-1]['unpatched_vulns'])} vulnerabilities remain")
         else:
-            results['status'] = 'partially_patched'
-            print(f"\n⚠️  Workflow completed - {len(all_iterations[-1]['unpatched_vulns'])} vulnerabilities remain")
-        
+            results['status'] = 'fully_patched'
+            results['show_patch_info_message'] = False
+            print("\n✅ Workflow completed successfully - all vulnerabilities patched!")
         return results
     
     def _step_preprocessing(self, code: str) -> str:
@@ -378,6 +610,45 @@ class VulnerabilityAnalysisWorkflow:
         vulns = self.detector.detect_vulnerabilities(code)
         return self.explainer.generate_explanations(vulns)
     
+    def _deduplicate_vulns_by_line(self, vuln_lists: List[List[Dict]]) -> List[Dict]:
+        """
+        Deduplicate vulnerabilities by CWE ID and line number only.
+        If the same CWE appears on different lines, count them separately.
+        If the same CWE appears on the same line but detected by different tools, count as 1.
+        
+        Args:
+            vuln_lists: List of vulnerability lists to merge and deduplicate
+            
+        Returns:
+            Deduplicated list of vulnerabilities
+        """
+        # Flatten all vulnerability lists
+        all_vulns = []
+        for vuln_list in vuln_lists:
+            if vuln_list:
+                all_vulns.extend(vuln_list)
+        
+        print(f"      Dedup input: {len(all_vulns)} total items before dedup")
+        
+        # Deduplicate by (CWE ID, line number) - same CWE on same line counts as 1
+        seen_keys = set()
+        deduped = []
+        
+        for vuln in all_vulns:
+            cwe_id = vuln.get('cwe_id', 'Unknown')
+            # Try 'line' first, then 'line_number', handle falsy values properly
+            line_num = vuln.get('line')
+            if line_num is None:
+                line_num = vuln.get('line_number', 'Unknown')
+            
+            key = (cwe_id, line_num)
+            
+            if key not in seen_keys:
+                seen_keys.add(key)
+                deduped.append(vuln)
+        
+        return deduped
+    
     def _convert_bandit_to_vulns(self, bandit_issues: List[Dict], code: str) -> List[Dict]:
         """
         Convert Bandit issues to vulnerability format for patching.
@@ -396,8 +667,8 @@ class VulnerabilityAnalysisWorkflow:
             line_num = issue.get('line_number', 0)
             snippet = code_lines[line_num - 1] if 0 < line_num <= len(code_lines) else ''
             
-            # Map Bandit test_id to CWE if available
-            cwe_id = issue.get('cwe_id') or self._map_bandit_test_to_cwe(issue.get('test_id', ''))
+            # Use CWE ID from Bandit (available in 1.7.5+)
+            cwe_id = issue.get('cwe_id', '1035')  # Default to CWE-1035 if not provided
             
             vuln = {
                 'cwe_id': cwe_id,
@@ -433,7 +704,8 @@ class VulnerabilityAnalysisWorkflow:
             line_num = issue.get('start', {}).get('line', 0) or issue.get('end', {}).get('line', 0)
             snippet = code_lines[line_num - 1] if 0 < line_num <= len(code_lines) else ''
             
-            cwe_id = issue.get('cwe_id') or self._map_semgrep_check_to_cwe(issue.get('check_id', ''))
+            # Use CWE ID from Semgrep metadata (available in recent versions)
+            cwe_id = issue.get('cwe_id', '1035')  # Default to CWE-1035 if not provided
             
             vuln = {
                 'cwe_id': cwe_id,
@@ -451,96 +723,23 @@ class VulnerabilityAnalysisWorkflow:
         
         return vulnerabilities
     
-    def _map_bandit_test_to_cwe(self, test_id: str) -> str:
-        """Map Bandit test IDs to CWE identifiers."""
-        mapping = {
-            'B201': '502',  # pickle usage
-            'B301': '502',  # pickle usage
-            'B302': '502',  # marshal usage
-            'B303': '937',  # MD5 usage
-            'B304': '326',  # weak crypto
-            'B305': '326',  # weak cipher
-            'B306': '377',  # mktemp usage
-            'B307': '78',   # eval usage
-            'B308': '94',   # mark_safe usage
-            'B310': '22',   # urllib.urlopen
-            'B311': '330',  # random usage
-            'B312': '78',   # telnetlib
-            'B313': '94',   # exec usage
-            'B314': '94',   # execfile usage
-            'B315': '94',   # exec usage
-            'B316': '94',   # exec usage
-            'B317': '94',   # exec usage
-            'B318': '94',   # exec usage
-            'B319': '94',   # exec usage
-            'B320': '94',   # exec usage
-            'B321': '367',  # FTP usage
-            'B322': '78',   # input usage
-            'B323': '703',  # unverified context
-            'B324': '326',  # hashlib MD5/SHA1
-            'B401': '94',   # import telnetlib
-            'B402': '94',   # import FTP
-            'B403': '94',   # import pickle
-            'B404': '78',   # import subprocess
-            'B405': '94',   # import lxml
-            'B406': '94',   # import lxml
-            'B407': '94',   # import lxml
-            'B408': '94',   # import lxml
-            'B409': '94',   # import lxml
-            'B410': '94',   # import lxml
-            'B411': '94',   # import lxml
-            'B412': '94',   # import lxml
-            'B501': '295',  # request verify=False
-            'B502': '295',  # SSL/TLS issues
-            'B503': '295',  # SSL/TLS issues
-            'B504': '295',  # SSL/TLS issues
-            'B505': '326',  # weak crypto
-            'B506': '522',  # yaml.load
-            'B507': '78',   # ssh no host key verification
-            'B601': '78',   # paramiko exec
-            'B602': '78',   # shell=True
-            'B603': '78',   # subprocess without shell
-            'B604': '78',   # shell=True
-            'B605': '78',   # shell=True
-            'B606': '78',   # shell=True
-            'B607': '78',   # partial path
-            'B608': '89',   # SQL hardcoded
-            'B609': '78',   # wildcard injection
-            'B610': '89',   # django SQL
-            'B611': '89',   # django SQL
-            'B701': '327',  # jinja2 autoescape
-            'B702': '798',  # Mako templates
-            'B703': '327',  # django mark_safe
-        }
-        return mapping.get(test_id, '1035')  # Default to CWE-1035 (Vulnerable Third Party Component)
-    
-    def _map_semgrep_check_to_cwe(self, check_id: str) -> str:
-        """Map Semgrep check IDs to CWE identifiers when possible."""
-        mapping = {
-            'python.lang.security.use-of-eval': '095',
-            'python.lang.security.use-of-exec': '094',
-            'python.sqlalchemy.security.sql-injection': '089',
-            'python.flask.security.insecure-os-system': '078',
-            'python.flask.security.path-traversal-open': '022',
-            'python.yaml.security.insecure-load': '502',
-            'python.requests.security.insecure-ssl-no-verify': '295',
-            'python.jinja2.security.autoescape-disabled': '327',
-        }
-        return mapping.get(check_id, '1035')
-    
     def _step_calculate_metrics(
         self,
         original_vulns: List[Dict],
         remaining_vulns: List[Dict],
         bandit_results: Dict,
-        secondary_results: Dict
+        secondary_results: Dict,
+        initial_code_deduped_count: int = 0,
+        all_iterations_deduped_count: int = 0
     ) -> Dict:
         """Step 10: Calculate comprehensive metrics."""
         return self.metrics_calc.calculate_comprehensive_metrics(
             original_vulns,
             remaining_vulns,
             bandit_results,
-            secondary_results
+            secondary_results,
+            initial_code_deduped_count,
+            all_iterations_deduped_count
         )
     
     def _step_final_reporting(self, results: Dict, workflow_id: str) -> Dict:
@@ -554,14 +753,14 @@ class VulnerabilityAnalysisWorkflow:
                 f"{workflow_id}_patch"
             )
         
-        # Patch report
-        if 'patch_iterations' in results:
+        # Patch report (only if at least one iteration exists)
+        if results.get('patch_iterations'):
             last_patch = results['patch_iterations'][-1]
             reports['patch_report'] = self.reporter.export_patch_report(
                 results['cleaned_code'],
                 results['final_patched_code'],
-                last_patch['changes'],
-                last_patch['unpatched_vulns'],
+                last_patch.get('changes', ''),
+                last_patch.get('unpatched_vulns', []),
                 f"{workflow_id}_patch"
             )
         

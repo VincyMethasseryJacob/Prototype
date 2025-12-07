@@ -25,7 +25,7 @@ This backend module provides comprehensive vulnerability detection, patching, an
 
 ### 🔬 Static Analysis
 - **Bandit Integration**: Primary static analysis tool
-- **Pylint Integration**: Secondary validation tool
+- **Semgrep Integration**: Secondary validation tool
 - **Cross-Validation**: Compare results from multiple tools
 - **Detailed Reports**: Issue counts, severity breakdowns, confidence levels
 
@@ -44,7 +44,7 @@ backend/
 ├── vuln_detection.py            # Vulnerability detection engine
 ├── explainability.py            # Explanation generation
 ├── patching.py                  # Code patching engine
-├── static_analysis.py           # Bandit & Pylint integration
+├── static_analysis.py           # Bandit & Semgrep integration
 ├── metrics.py                   # Metrics calculation
 ├── reporting.py                 # Report generation
 ├── preprocessing.py             # Code cleaning and normalization
@@ -152,8 +152,8 @@ Ensure static analysis tools are available:
 # Verify Bandit installation
 bandit --version
 
-# Verify Pylint installation
-pylint --version
+# Verify Semgrep installation
+semgrep --version
 ```
 
 ## Workflow Steps
@@ -166,7 +166,7 @@ The complete workflow executes these steps automatically:
 4. **Initial Reporting**: Create vulnerability reports
 5. **Patching**: Generate secure patched code
 6. **Primary Static Analysis**: Validate with Bandit
-7. **Secondary Analysis**: Cross-validate with Pylint
+7. **Secondary Analysis**: Cross-validate with Semgrep
 8. **Iterative Repair**: Repeat patching if needed (up to max iterations)
 9. **Final Analysis**: Run tools on final patched code
 10. **Metrics Calculation**: Calculate effectiveness metrics
@@ -206,7 +206,7 @@ The framework generates multiple report types:
 - **Vulnerability Reports**: CSV and JSON with all detected issues
 - **Patch Reports**: JSON with before/after code and changes
 - **Code Diffs**: Unified diff format showing changes
-- **Static Analysis Reports**: JSON with Bandit and Pylint results
+- **Static Analysis Reports**: JSON with Bandit and Semgrep results
 - **Metrics Reports**: JSON and CSV with effectiveness metrics
 - **HTML Summary**: Human-readable HTML report
 
@@ -240,13 +240,13 @@ detected_vulns.extend(custom_vulns)
 
 - **Detection Speed**: ~1-2 seconds for typical code snippets
 - **Patching Speed**: ~2-5 seconds per iteration
-- **Static Analysis**: ~3-5 seconds for Bandit + Pylint
+- **Static Analysis**: ~3-5 seconds for Bandit + Semgrep
 - **Total Workflow**: ~10-30 seconds depending on complexity
 
 ## Limitations
 
 - Python code only (currently)
-- Requires Bandit and Pylint to be installed
+- Requires Bandit and Semgrep to be installed
 - LLM-based patching requires OpenAI API access
 - Pattern-based detection may have false positives
 - AST analysis limited to syntactically valid code

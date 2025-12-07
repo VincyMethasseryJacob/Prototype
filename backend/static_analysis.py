@@ -222,11 +222,17 @@ class StaticAnalyzer:
 
         try:
             # Semgrep JSON output
+            env = os.environ.copy()
+            env.setdefault('PYTHONIOENCODING', 'utf-8')
+            env.setdefault('PYTHONUTF8', '1')
             result = subprocess.run(
                 ['semgrep', '--json', '--config', config, code_path],
                 capture_output=True,
                 text=True,
-                timeout=60
+                encoding='utf-8',
+                errors='replace',
+                timeout=60,
+                env=env
             )
             output = result.stdout
 

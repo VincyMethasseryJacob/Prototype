@@ -37,6 +37,115 @@ MAX_PROMPTS = 20
 MAX_RESPONSE_TOKENS = 5000
 
 
+def _add_line_numbers(code: str) -> str:
+    """Return code with 1-based line numbers for display."""
+    numbered_lines = []
+    for idx, line in enumerate(code.split('\n'), 1):
+        numbered_lines.append(f"{idx:4}: {line}")
+    return "\n".join(numbered_lines)
+
+
+def parse_cwe_info(cwe_data: str) -> tuple:
+    """
+    Parse CWE information to extract ID and name.
+    Handles formats like:
+    - "78" -> ("CWE-078", "OS Command Injection")
+    - "78: OS Command Injection" -> ("CWE-078", "OS Command Injection")
+    - "CWE-078" -> ("CWE-078", "OS Command Injection")
+    
+    Returns:
+        tuple: (formatted_cwe_id, cwe_name)
+    """
+    if not cwe_data or cwe_data == 'N/A':
+        return ('N/A', '')
+    
+    cwe_str = str(cwe_data).strip()
+    
+    # Check if there's a colon separating ID from name
+    if ':' in cwe_str:
+        parts = cwe_str.split(':', 1)
+        cwe_id = parts[0].strip()
+        cwe_name = parts[1].strip()
+    else:
+        cwe_id = cwe_str
+        cwe_name = ''
+    
+    # Extract just the number from formats like "CWE-78" or "78"
+    cwe_id = re.sub(r'[^\d]', '', cwe_id)
+    
+    # Format as CWE- with zero-padding to 3 digits
+    if cwe_id and cwe_id.isdigit():
+        formatted_cwe = f"CWE-{int(cwe_id):03d}"
+        # If no name was provided, fetch it from the mapping
+        if not cwe_name:
+            cwe_name = get_cwe_name(cwe_id)
+    else:
+        formatted_cwe = 'N/A'
+    
+    return (formatted_cwe, cwe_name)
+
+
+def get_cwe_name(cwe_id: str) -> str:
+    """
+    Get CWE name from CWE ID using the mapping from VulnerabilityDetector.
+    """
+    # Normalize CWE ID - remove 'CWE-' prefix if present
+    cwe_id_str = str(cwe_id).strip()
+    if cwe_id_str.upper().startswith('CWE-'):
+        cwe_id_str = cwe_id_str[4:]
+    
+    # Pad with leading zeros for consistency
+    if cwe_id_str.isdigit() and len(cwe_id_str) < 3:
+        cwe_id_str = cwe_id_str.zfill(3)
+    
+    cwe_names = {
+        '020': 'Improper Input Validation',
+        '022': 'Path Traversal',
+        '078': 'OS Command Injection',
+        '080': 'Improper Neutralization of Script-Related HTML Tags (Basic XSS)',
+        '089': 'SQL Injection',
+        '094': 'Code Injection',
+        '095': 'Eval Injection',
+        '116': 'Improper Encoding',
+        '117': 'Log Injection',
+        '193': 'Off-by-one Error',
+        '200': 'Information Exposure',
+        '252': 'Unchecked Return Value',
+        '259': 'Hard-coded Password',
+        '285': 'Improper Authorization',
+        '295': 'Certificate Validation',
+        '319': 'Cleartext Transmission',
+        '321': 'Hard-coded Cryptographic Key',
+        '326': 'Weak Encryption',
+        '330': 'Weak Random',
+        '331': 'Insufficient Entropy',
+        '352': 'Cross-Site Request Forgery (CSRF)',
+        '367': 'TOCTOU Race Condition',
+        '377': 'Insecure Temporary File',
+        '400': 'Uncontrolled Resource Consumption',
+        '414': 'Missing Lock Check',
+        '425': 'Direct Request',
+        '454': 'External Initialization',
+        '477': 'Obsolete Function',
+        '502': 'Deserialization',
+        '522': 'Insufficiently Protected Credentials',
+        '532': 'Insertion of Sensitive Information into Log File',
+        '595': 'Sensitive Cookie',
+        '605': 'Multiple Binds',
+        '611': 'XXE',
+        '614': 'Sensitive Cookie in HTTPS Session',
+        '693': 'Missing Security Header',
+        '703': 'Improper Check',
+        '730': 'Regex DoS',
+        '732': 'Incorrect Permission',
+        '798': 'Hard-coded Credentials',
+        '835': 'Infinite Loop',
+        '937': 'Using Components with Known Vulnerabilities',
+        '1004': 'Sensitive Cookie Without Secure Flag'
+    }
+    return cwe_names.get(cwe_id_str, 'Unknown Vulnerability')
+
+
 def get_code_context(code: str, line_number: int, context_lines: int = 2) -> str:
     """
     Extract code context around a specific line with an arrow pointing to the issue.
@@ -166,18 +275,17 @@ class App:
                     if not api_key.strip():
                         st.error("Please enter a valid API key.")
                         return
-                    try:
-                        # Validate API key
-                        OpenAIClientWrapper(api_key.strip())
-                        st.session_state.api_key = api_key.strip()
-                        st.session_state.api_loaded = True
-                        st.session_state.securityeval_map = self.loader.load_prompts(TESTCASES_DIR)
-                        st.session_state.api_init_error = ""
-                        st.success("API key validated! Loading application…")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to initialize OpenAI client: {e}")
-                        st.session_state.api_init_error = str(e)
+                    # Validate API key with OpenAI
+                    from services.openai_client_wrapper import OpenAIClientWrapper
+                    if not OpenAIClientWrapper.validate_api_key(api_key.strip()):
+                        st.error("The entered API key is invalid. Please check and try again.")
+                        return
+                    st.session_state.api_key = api_key.strip()
+                    st.session_state.api_loaded = True
+                    st.session_state.securityeval_map = self.loader.load_prompts(TESTCASES_DIR)
+                    st.session_state.api_init_error = ""
+                    st.success("API key validated! Loading application…")
+                    st.rerun()
 
         # Stop rendering below until API is loaded
         st.stop()
@@ -495,7 +603,17 @@ class App:
         # Summary metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            total_detected = results.get('metrics', {}).get('total_detected', results.get('vulnerability_count', 0))
+            # Total detected = custom (initial) + bandit (initial) + semgrep (initial) + all iteration findings
+            initial_custom = results.get('metrics', {}).get('custom_detector_initial', 0)
+            initial_bandit = len(results.get('bandit_original', {}).get('issues', [])) if results.get('bandit_original', {}).get('success') else 0
+            initial_semgrep = len(results.get('semgrep_original', {}).get('issues', [])) if results.get('semgrep_original', {}).get('success') else 0
+            metrics_obj = results.get('metrics', {})
+            total_detected = (
+                metrics_obj.get('total_detected_all_occurrences')
+                or results.get('total_vulns_found_all_occurrences')
+                or len(results.get('all_found_vulns_occurrences', []))
+                or metrics_obj.get('total_detected', 0)
+            )
             st.metric("Total Vulnerabilities Found", total_detected)
         with col2:
             total_fixed = results.get('metrics', {}).get('total_fixed', 0)
@@ -506,22 +624,39 @@ class App:
             success_rate = results.get('metrics', {}).get('overall_success_rate', 0)
             st.metric("Success Rate", f"{success_rate:.1%}")
         
+        # Additional breakdown metrics
+        col5, col6 = st.columns(2)
+        with col5:
+            # Total in initial code = sum of custom + bandit + semgrep from initial run
+            initial_custom = results.get('initial_custom_count', 0)
+            initial_bandit = results.get('initial_bandit_count', 0)
+            initial_semgrep = results.get('initial_semgrep_count', 0)
+            initial_total = initial_custom + initial_bandit + initial_semgrep
+            st.metric("Total Vulnerabilities Found in Initial Code", initial_total)
+        with col6:
+            # Total in iterations = sum of all tool findings in iterations
+            iteration_custom = results.get('iteration_custom_count', 0)
+            iteration_bandit = results.get('iteration_bandit_count', 0)
+            iteration_semgrep = results.get('iteration_semgrep_count', 0)
+            iterations_total = iteration_custom + iteration_bandit + iteration_semgrep
+            st.metric("Total Vulnerabilities Found in Iterations", iterations_total)
+        
         # Detected Vulnerabilities Custom Detector- Collect from initial and all iterations
-        st.markdown("### 🔴 Custom Detector Vulnerabilities")
-        
-        # Collect initial vulnerabilities
+        st.markdown("### 🔴 Custom Detector Vulnerability")
+        st.info("ℹ️ This table shows the vulnerabilities identified in the initial source code.  For patching iteration verbosity, please refer to the report section.")
+
+        # Collect initial vulnerabilities only
         initial_vulns = results.get('vulnerabilities_with_explanations', [])
-        patch_iterations = results.get('patch_iterations', [])
         
-        # Build comprehensive vulnerability tracking across all iterations
-        all_vulns_tracking = {}
+        # Build vulnerability tracking for initial code only
+        initial_vulns_tracking = {}
         
         # Add initial vulnerabilities
         for v in initial_vulns:
             cwe_id = v.get('cwe_id')
             key = (cwe_id, v.get('cwe_name'))
-            if key not in all_vulns_tracking:
-                all_vulns_tracking[key] = {
+            if key not in initial_vulns_tracking:
+                initial_vulns_tracking[key] = {
                     'cwe_id': cwe_id,
                     'cwe_name': v.get('cwe_name'),
                     'severity': v.get('severity'),
@@ -529,88 +664,39 @@ class App:
                     'explanation': v.get('explanation'),
                     'patch_note': v.get('patch_note'),
                     'priority': v.get('remediation_priority'),
-                    'initial_count': 0,
-                    'iteration_counts': {},  # {iteration_num: count}
-                    'all_lines': [],
-                    'all_occurrences': []  # [{source, line, snippet, explanation}]
+                    'lines': [],
+                    'all_occurrences': []
                 }
-            all_vulns_tracking[key]['initial_count'] += 1
-            all_vulns_tracking[key]['all_lines'].append(v.get('line_number'))
-            all_vulns_tracking[key]['all_occurrences'].append({
-                'source': 'Initial Source Code',
+            initial_vulns_tracking[key]['lines'].append(v.get('line_number'))
+            initial_vulns_tracking[key]['all_occurrences'].append({
                 'line': v.get('line_number'),
                 'snippet': v.get('code_snippet', ''),
                 'explanation': v.get('explanation', '')
             })
         
-        # Add iteration vulnerabilities from custom detector
-        for iter_idx, iteration in enumerate(patch_iterations[1:], 1):
-            custom_vulns = iteration.get('custom_detector_vulns', {})
-            for (cwe_id, cwe_name), vuln_info in custom_vulns.items():
-                key = (cwe_id, cwe_name)
-                if key not in all_vulns_tracking:
-                    all_vulns_tracking[key] = {
-                        'cwe_id': cwe_id,
-                        'cwe_name': cwe_name,
-                        'severity': 'MEDIUM',
-                        'description': f'Vulnerability detected in patched code',
-                        'explanation': vuln_info.get('explanations', [''])[0] if vuln_info.get('explanations') else '',
-                        'patch_note': 'See iteration details',
-                        'priority': 'Medium',
-                        'initial_count': 0,
-                        'iteration_counts': {},
-                        'all_lines': [],
-                        'all_occurrences': []
-                    }
-                count = len(vuln_info['lines'])
-                all_vulns_tracking[key]['iteration_counts'][iter_idx] = count
-                all_vulns_tracking[key]['all_lines'].extend(vuln_info['lines'])
-                for i, line in enumerate(vuln_info['lines']):
-                    all_vulns_tracking[key]['all_occurrences'].append({
-                        'source': f'Patch Iteration {iter_idx}',
-                        'line': line,
-                        'snippet': '',
-                        'explanation': vuln_info['explanations'][i] if i < len(vuln_info['explanations']) else ''
-                    })
-        
-        if all_vulns_tracking:
-            # Summary table with initial + iteration tracking
+        if initial_vulns_tracking:
+            # Summary table - initial code vulnerabilities only
             vuln_data = []
-            for key, g in all_vulns_tracking.items():
-                # Count total occurrences
-                total_occurrences = g['initial_count'] + sum(g['iteration_counts'].values())
-                
-                # Build found in column
-                found_in_parts = []
-                if g['initial_count'] > 0:
-                    found_in_parts.append("Source code")
-                for iter_num in sorted(g['iteration_counts'].keys()):
-                    found_in_parts.append(f"Iteration {iter_num}")
-                found_in = '; '.join(found_in_parts)
-                
+            for key, g in initial_vulns_tracking.items():
                 # Get unique sorted lines
-                unique_lines = sorted(set(g['all_lines']), key=lambda x: int(x) if str(x).isdigit() else 0)
+                unique_lines = sorted(set(g['lines']), key=lambda x: int(x) if str(x).isdigit() else 0)
                 lines_str = ', '.join(str(l) for l in unique_lines)
                 
                 vuln_data.append({
                     'CWE ID': f"CWE-{g['cwe_id']}",
                     'Name': g['cwe_name'],
                     'Severity': g['severity'],
-                    'Occurrences': total_occurrences,
-                    'Found In': found_in,
+                    'Occurrences': len(g['all_occurrences']),
                     'Lines': lines_str,
                     'Priority': g['priority']
                 })
             
             st.dataframe(vuln_data, use_container_width=True)
-            
-            # Get iteration code files for showing vulnerable code
-            final_reports = results.get('final_reports', {})
-            iteration_codes = final_reports.get('iteration_codes', {})
+    
             
             # Enhanced detailed vulnerability view with better organization
-            with st.expander("📋 View Detailed Vulnerability Information"):
-                for idx, (key, g) in enumerate(all_vulns_tracking.items(), 1):
+            with st.expander("📋 View Detailed Vulnerability Information - " + str(sum(len(g['all_occurrences']) for g in initial_vulns_tracking.values()))):
+                for idx, (key, g) in enumerate(initial_vulns_tracking.items(), 1):
                     # Use columns for better layout
                     col_header, col_stats = st.columns([3, 1])
                     with col_header:
@@ -628,489 +714,288 @@ class App:
                         st.markdown("**Patch Recommendation:**")
                         st.success(g['patch_note'])
                     
-                    # Occurrences by source
+                    # Show occurrences with code context
                     st.markdown("**Occurrences Details:**")
                     
-                    # Group by source and iteration
-                    by_source = {}
-                    for occ in g['all_occurrences']:
-                        source = occ['source']
-                        if source not in by_source:
-                            by_source[source] = []
-                        by_source[source].append(occ)
-                    
-                    # Display grouped by source with tabs if multiple sources
-                    if len(by_source) > 1:
-                        tabs = st.tabs(list(by_source.keys()))
-                        for tab, (source, occs) in zip(tabs, by_source.items()):
-                            with tab:
-                                for occ_idx, occ in enumerate(occs, 1):
-                                    st.markdown(f"**Line {occ['line']}**")
-                                    # Removed explanation display
-                                    # Try to get code from iteration file if it's from an iteration
-                                    code_shown = False
-                                    if 'Iteration' in source and iteration_codes:
-                                        import re
-                                        iter_match = re.search(r'Iteration (\d+)', source)
-                                        if iter_match:
-                                            iter_num = iter_match.group(1)
-                                            iter_key = f'iteration_{iter_num}'
-                                            if iter_key in iteration_codes:
-                                                iter_file = iteration_codes[iter_key]
-                                                code_context = get_code_from_iteration_file(iter_file, occ['line'], context_lines=3)
-                                                if code_context:
-                                                    st.code(code_context, language='python')
-                                                    code_shown = True
-                                    
-                                    # Fallback to stored snippet
-                                    if not code_shown and occ['snippet']:
-                                        st.code(occ['snippet'], language='python')
-                    else:
-                        # Single source, display directly
-                        source = list(by_source.keys())[0]
-                        st.markdown(f"*Source: {source}*")
-                        for occ_idx, occ in enumerate(by_source[source], 1):
-                            st.markdown(f"**{occ_idx}. Line {occ['line']}**")
-                            # Removed explanation display
-                            # Try to get code from iteration file or original code
-                            code_shown = False
-                            if 'Iteration' in source and iteration_codes:
-                                import re
-                                iter_match = re.search(r'Iteration (\d+)', source)
-                                if iter_match:
-                                    iter_num = iter_match.group(1)
-                                    iter_key = f'iteration_{iter_num}'
-                                    if iter_key in iteration_codes:
-                                        iter_file = iteration_codes[iter_key]
-                                        code_context = get_code_from_iteration_file(iter_file, occ['line'], context_lines=3)
-                                        if code_context:
-                                            st.code(code_context, language='python')
-                                            code_shown = True
-                            elif 'Initial Source Code' in source:
-                                # Show code from original cleaned code
-                                original_code = results.get('cleaned_code', results.get('original_code', ''))
-                                if original_code:
-                                    code_context = get_code_context(original_code, occ['line'], context_lines=3)
-                                    if code_context:
-                                        st.code(code_context, language='python')
-                                        code_shown = True
-                            
-                            # Fallback to stored snippet
-                            if not code_shown and occ['snippet']:
-                                st.code(occ['snippet'], language='python')
+                    for occ_idx, occ in enumerate(g['all_occurrences'], 1):
+                        # Show filename/source if available, else fallback to a default label
+                        source_file = v.get('filename', 'Source Code') if 'filename' in v else 'Source Code'
+                        st.markdown(f"**{occ_idx}. {source_file} - Line {occ['line']}**")
+                        if occ['snippet']:
+                            st.code(occ['snippet'], language='python')
                     
                     st.markdown("---")
+        
         else:
             st.success("✅ No vulnerabilities detected by Custom Detector!")
         
-        # Patched Code
-        st.markdown("### ✅ Code Difference")
+        # Show patched code if available
+        st.markdown("### 🔧 Code Difference")
         
-        # Show iteration info
-        total_iterations = results.get('total_iterations', 1)
-        patch_iterations = results.get('patch_iterations', [])
-        final_code = results.get('final_patched_code', results.get('patch_result', {}).get('patched_code', ''))
-        bandit_final = results.get('bandit_final', {})
-        secondary_final = results.get('secondary_final', {})
-        metrics = results.get('metrics', {})
-        total_remaining = metrics.get('total_remaining', 0)
+        # Get the cleaned code (preprocessed code that was analyzed)
+        cleaned_code = results.get('cleaned_code', '')
+        # Get final patched code (with 0 vulnerabilities)
+        final_patched_code = results.get('final_patched_code', '')
         
-        if total_remaining == 0:
-            st.success("✅ **All vulnerabilities resolved!** This code has 0 issues detected by all three tools.")
+        # Show status message based on remaining vulnerabilities BEFORE showing code
+        if cleaned_code and final_patched_code:
+            remaining_vulns = results.get('metrics', {}).get('total_remaining', 0)
+            if remaining_vulns == 0:
+                st.success("✅ Code has been successfully patched with 0 vulnerabilities remaining!")
+            else:
+                st.warning(f"⚠️ The final patched code is partially fixed. {remaining_vulns} vulnerability(ies) couldn't be fixed and remain in the code.")
+        
+        # Show code comparison if both exist
+        if cleaned_code and final_patched_code:
+            col_orig, col_patch = st.columns(2)
+            
+            with col_orig:
+                st.markdown("#### Original Code")                
+                st.code(_add_line_numbers(cleaned_code), language='python')
+            
+            with col_patch:
+                st.markdown("#### Final Patched Code")
+                st.code(_add_line_numbers(final_patched_code), language='python')
+        elif cleaned_code:
+            st.info("✅ No vulnerabilities were found - code is already secure!")
+            st.markdown("#### Original Code")
+            st.code(_add_line_numbers(cleaned_code), language='python')
         else:
-            st.warning(f"⚠️ **{total_remaining} issues remaining** after {total_iterations} iteration(s). Some vulnerabilities could not be automatically fixed.")
+            st.info("No code available to display.")
         
-        if final_code:
-            col_before, col_after = st.columns(2)
-            
-            with col_before:
-                st.markdown("#### 📝 Before (Original)")
-                st.code(results.get('original_code', ''), language='python', line_numbers=True)
-            
-            with col_after:
-                st.markdown("#### ✨ After (Final Patched)")
-                st.code(final_code, language='python', line_numbers=True)
-            
-            # Changes applied
-            changes = results.get('patch_result', {}).get('changes', [])
-            col_changes, col_remaining = st.columns(2)
-            with col_changes:
-                if changes:
-                    with st.expander("🔧 View Applied Changes"):
-                        # Group changes by CWE and methods only (not by description)
-                        grouped_changes = {}
-                        for change in changes:
-                            cwe_id = change.get('cwe_id', '')
-                            cwe_name = change.get('cwe_name', '')
-                            detection_method = change.get('detection_method', 'unknown')
-                            patch_method = change.get('patch_method', 'unknown')
-                            change_desc = change.get('change_description', '')
-                            
-                            # Create grouping key (without change_description to group similar fixes)
-                            key = (cwe_id, cwe_name, detection_method, patch_method)
-                            
-                            if key not in grouped_changes:
-                                grouped_changes[key] = {
-                                    'lines': [],
-                                    'descriptions': [],
-                                    'cwe_id': cwe_id,
-                                    'cwe_name': cwe_name,
-                                    'detection_method': detection_method,
-                                    'patch_method': patch_method
-                                }
-                            
-                            line_num = change.get('line_number')
-                            if line_num is not None:
-                                grouped_changes[key]['lines'].append(line_num)
-                                grouped_changes[key]['descriptions'].append((line_num, change_desc))
-                        
-                        # Display grouped changes
-                        for i, (key, group) in enumerate(grouped_changes.items(), 1):
-                            cwe_id = group['cwe_id']
-                            cwe_name = group['cwe_name']
-                            detection_method = group['detection_method']
-                            patch_method = group['patch_method']
-                            lines = sorted(set(group['lines']))  # Remove duplicates and sort
-                            
-                            # Format detection method for display
-                            detection_display = {
-                                'llm': 'LLM',
-                                'pattern': 'Pattern Matching',
-                                'ast': 'AST Analysis',
-                                'ast-param': 'AST Parameter Analysis',
-                                'ast-except': 'AST Exception Analysis',
-                                'ast-taint': 'AST Taint Analysis',
-                                'similarity': 'Code Similarity',
-                                'unknown': 'Unknown'
-                            }.get(detection_method, detection_method.upper())
-                            
-                            patch_display = {
-                                'rule-based': 'Rule-Based Patch',
-                                'llm-based': 'LLM-Generated Patch',
-                                'unknown': 'Unknown'
-                            }.get(patch_method, patch_method)
-                            
-                            # Format line numbers display
-                            if len(lines) == 1:
-                                lines_text = f"Line {lines[0]}"
-                            else:
-                                lines_text = f"Lines {', '.join(map(str, lines))}"
-                            
-                            st.markdown(f"**{i}. CWE-{cwe_id}: {cwe_name}**")
-                            st.markdown(f"{lines_text}: Fixed")
-                            
-                            # Show individual descriptions if they vary
-                            if len(set(desc for _, desc in group['descriptions'])) > 1:
-                                st.markdown("**Changes:**")
-                                for line_num, desc in sorted(group['descriptions']):
-                                    st.markdown(f"  - Line {line_num}: {desc}")
-                            else:
-                                # All descriptions are the same, show just one
-                                if group['descriptions']:
-                                    st.markdown(f"**Change:** {group['descriptions'][0][1]}")
-                            
-                            st.markdown(f"_Detected by: {detection_display} | Fixed by: {patch_display}_")
-                            st.markdown("---")
-            with col_remaining:
-                with st.expander("❌ Vulnerabilities Not Fixed After All Iterations"):
-                    remaining_vulns = []
-
-                    # Custom detector remaining (final iteration unpatched_vulns)
-                    if patch_iterations and patch_iterations[-1].get('unpatched_vulns'):
-                        for v in patch_iterations[-1]['unpatched_vulns']:
-                            remaining_vulns.append({
-                                'Tool': 'Custom Detector',
-                                'CWE': v.get('cwe_id', 'N/A'),
-                                'Name': v.get('cwe_name', 'Unknown'),
-                                'Line': v.get('line_number', 'Unknown'),
-                                'Description': v.get('explanation', '')
-                            })
-
-                    # Bandit remaining on final code
-                    if bandit_final.get('success'):
-                        for issue in bandit_final.get('issues', []):
-                            remaining_vulns.append({
-                                'Tool': 'Bandit',
-                                'CWE': issue.get('test_id', 'N/A'),
-                                'Name': issue.get('issue_text', issue.get('test_name', 'Bandit Issue')),
-                                'Line': issue.get('line_number', 'Unknown'),
-                                'Description': issue.get('issue_text', '')
-                            })
-
-                    # Semgrep remaining on final code
-                    if secondary_final.get('success'):
-                        for issue in secondary_final.get('issues', []):
-                            lines = issue.get('line_number')
-                            line_list = lines if isinstance(lines, list) else ([lines] if lines is not None else [])
-                            for line in line_list:
-                                remaining_vulns.append({
-                                    'Tool': 'Semgrep',
-                                    'CWE': issue.get('message_id', issue.get('symbol', 'N/A')),
-                                    'Name': issue.get('description', 'Secondary Issue'),
-                                    'Line': line,
-                                    'Description': issue.get('description', '')
-                                })
-
-                    if remaining_vulns:
-                        st.dataframe(pd.DataFrame(remaining_vulns), use_container_width=True, hide_index=True)
-                    else:
-                        st.success("✅ All vulnerabilities were fixed!")
-        
-        # Static Analysis Results
+        # Static Analysis Results - Initial Code Only
         st.markdown("### 🔬 Static Analysis Results")
-        st.info("ℹ️ Bandit and Semgrep analysis report on both original and iterated patched code.")
-
-        # Static analysis results (show both original and final)
+        
+        # Calculate total vulnerabilities from Bandit and Semgrep
         bandit_original = results.get('bandit_original', {})
-        bandit_patched = results.get('bandit_final', results.get('bandit_patched', {}))
         secondary_original = results.get('semgrep_original', results.get('secondary_original', {}))
-        secondary_patched = results.get('secondary_final', results.get('secondary_patched', {}))
+        
+        bandit_original_count = len(bandit_original.get('issues', [])) if bandit_original.get('success') else 0
+        semgrep_original_count = len(secondary_original.get('issues', [])) if secondary_original.get('success') else 0
+        
+        # Count vulnerabilities found across all iterations
+        patch_iterations = results.get('patch_iterations', [])
+        bandit_iteration_count = 0
+        semgrep_iteration_count = 0
+        
+        for iteration in patch_iterations:
+            bandit_analysis = iteration.get('bandit_analysis', {})
+            semgrep_analysis = iteration.get('semgrep_analysis', {})
+            
+            if bandit_analysis.get('success'):
+                bandit_iteration_count += len(bandit_analysis.get('issues', []))
+            
+            if semgrep_analysis.get('success'):
+                semgrep_iteration_count += len(semgrep_analysis.get('issues', []))
+        
+        total_static_vulns = bandit_original_count + bandit_iteration_count + semgrep_original_count + semgrep_iteration_count
+        st.metric("Total Vulnerabilities Found", total_static_vulns)   
 
         col_bandit, col_secondary = st.columns(2)
         
         with col_bandit:
             st.markdown("#### Bandit Analysis")
-            original_count = len(bandit_original.get('issues', [])) if bandit_original.get('success') else 0
-            final_count = len(bandit_patched.get('issues', [])) if bandit_patched.get('success') else 0
-            bandit_total_identified = original_count + final_count
-            st.metric("Total Issues", bandit_total_identified)
-            if bandit_patched.get('success'):
-                patched_count = final_count
-                
-                if patched_count > 0:
-                    # Get iteration code files for context lookup
-                    final_reports = results.get('final_reports', {})
-                    iteration_codes = final_reports.get('iteration_codes', {})
+            
+            col_bandit_1, col_bandit_2 = st.columns(2)
+            with col_bandit_1:
+                st.metric("Total Issues Found in Initial Code", bandit_original_count)
+            with col_bandit_2:
+                st.metric("Total Issues Found in Iterations", bandit_iteration_count)
+            
+            if bandit_original_count > 0:
+                with st.expander(f"🔍 View Bandit Issues - {bandit_original_count}"):
+                    # Bandit runs on cleaned_code in the backend; use the same to align line numbers
+                    bandit_source_code = results.get('cleaned_code', results.get('original_code', ''))
+                    code_lines = bandit_source_code.split('\n') if bandit_source_code else []
                     
-                    with st.expander(f"🔍 View Bandit Issues - {patched_count}"):
-                        for idx, issue in enumerate(bandit_patched.get('issues', []), 1):
-                            test_name = issue.get('test_name', issue.get('test_id', 'N/A'))
-                            issue_text = issue.get('issue_text', issue.get('description', ''))
-                            if not issue_text or issue_text == 'No description':
-                                issue_text = test_name
-                            st.markdown(f"**{idx}. {issue.get('test_id', 'N/A')}: {issue_text}**")
-                            # Severity/Confidence come from Bandit's static analysis output
-                            severity = issue.get('issue_severity') or issue.get('severity') or 'MEDIUM'
-                            confidence = issue.get('issue_confidence') or issue.get('confidence') or 'MEDIUM'
-                            st.markdown(f"- **Severity:** {severity}")
-                            st.markdown(f"- **Confidence:** {confidence}")
-                            line_num = issue.get('line_number')
-                            st.markdown(f"- **Line:** {line_num}")
-                            
-                            # Try to get code context from iteration file first
-                            code_context = ""
-                            if iteration_codes and line_num:
-                                # Use the last iteration file (most patched version)
-                                last_iteration = max(
-                                    [k for k in iteration_codes.keys() if k.startswith('iteration_')],
-                                    key=lambda x: int(x.split('_')[1]),
-                                    default=None
-                                )
-                                if last_iteration and last_iteration in iteration_codes:
-                                    iter_file = iteration_codes[last_iteration]
-                                    code_context = get_code_from_iteration_file(iter_file, line_num, context_lines=3)
-                            
-                            # Fallback to Bandit's provided code snippet if no iteration file context
-                            if code_context:
-                                st.code(code_context, language='python')
-                            elif issue.get('code'):
-                                code_snippet = issue.get('code', '')
-                                snippet_lines = code_snippet.split('\n')
-                                
-                                if len(snippet_lines) > 1 and line_num:
-                                    # Find which line in the snippet has the vulnerable line number
-                                    # Format is "19 sql = ..." (line number, space, then code)
-                                    vulnerable_line_index = None
-                                    for i, line in enumerate(snippet_lines):
-                                        # Check if line starts with the line number followed by space
-                                        if line.strip().startswith(f"{line_num} "):
-                                            vulnerable_line_index = i + 1  # Convert to 1-indexed
-                                            break
-                                    
-                                    if vulnerable_line_index is None:
-                                        # Fallback: if line number not found, assume last non-empty line
-                                        for i in range(len(snippet_lines) - 1, -1, -1):
-                                            if snippet_lines[i].strip():
-                                                vulnerable_line_index = i + 1
-                                                break
-                                    
-                                    # Format the snippet with arrow on vulnerable line
-                                    formatted_lines = []
-                                    for i, line in enumerate(snippet_lines):
-                                        if i + 1 == vulnerable_line_index:
-                                            formatted_lines.append("→ " + line)
-                                        else:
-                                            formatted_lines.append("  " + line)
-                                    
-                                    st.code('\n'.join(formatted_lines), language='python')
-                                else:
-                                    st.code(code_snippet, language='python')
-                            st.markdown("---")
-                else:
-                    st.success("✅ No issues found by Bandit!")
+                    for idx, issue in enumerate(bandit_original.get('issues', []), 1):
+                        test_id = issue.get('test_id', 'N/A')
+                        issue_text = issue.get('issue_text', issue.get('test_name', 'Bandit Issue'))
+                        line_number = issue.get('line_number', 0)
+                        cwe_raw = issue.get('cwe_id', 'N/A')
+                        cwe_id, cwe_name = parse_cwe_info(cwe_raw)
+
+                        # Display issue info with CWE
+                        cwe_display = f" [{cwe_id}]" if cwe_id != 'N/A' else ""
+                        st.markdown(f"**{idx}. {test_id}** - {issue_text} (Line {line_number}){cwe_display}")
+
+                        # Show a 3-line window around the vulnerable line with an arrow
+                        if line_number and 1 <= line_number <= len(code_lines):
+                            start = max(1, line_number - 1)  # ensure at least one line before when possible
+                            end = min(len(code_lines), line_number + 1)  # ensure at least one line after when possible
+                            snippet_lines = []
+                            for ln in range(start, end + 1):
+                                prefix = "→" if ln == line_number else " "
+                                safe_line = code_lines[ln - 1].rstrip()
+                                snippet_lines.append(f"{prefix} {ln:>4}: {safe_line}")
+                            # If we ended up with only 2 lines (file too short), try to extend to 3 when possible
+                            if len(snippet_lines) < 3 and end < len(code_lines):
+                                ln = end + 1
+                                safe_line = code_lines[ln - 1].rstrip()
+                                snippet_lines.append(f"  {ln:>4}: {safe_line}")
+                            st.markdown("```python\n" + "\n".join(snippet_lines) + "\n```")
+                        else:
+                            st.warning("⚠️ Code context unavailable for this line")
+
+                        st.markdown("---")
             else:
-                st.error("❌ Bandit analysis failed")
+                st.success("✅ No issues found by Bandit in initial code!")
         
         with col_secondary:
             st.markdown("#### Semgrep Analysis")
-            original_count = len(secondary_original.get('issues', [])) if secondary_original.get('success') else 0
-            final_count = len(secondary_patched.get('issues', [])) if secondary_patched.get('success') else 0
-            semgrep_total_identified = original_count + final_count
-            st.metric("Total Issue", semgrep_total_identified)
-            if secondary_patched.get('success'):
-                patched_count = final_count
-                
-                if patched_count > 0:
-                    with st.expander(f"🔍 View Semgrep Issues - {patched_count}"):
-                        # Get patched code from results
-                        patched_code = results.get('final_patched_code', results.get('patch_result', {}).get('patched_code', ''))
+            
+            col_semgrep_1, col_semgrep_2 = st.columns(2)
+            with col_semgrep_1:
+                st.metric("Total Issues Found in Initial Code", semgrep_original_count)
+            with col_semgrep_2:
+                st.metric("Total Issues Found in Iterations", semgrep_iteration_count)
+            
+            if semgrep_original_count > 0:
+                with st.expander(f"🔍 View Semgrep Issues - {semgrep_original_count}"):
+                    # Semgrep runs on cleaned_code; use the same to align line numbers
+                    semgrep_source_code = results.get('cleaned_code', results.get('original_code', ''))
+                    code_lines = semgrep_source_code.split('\n') if semgrep_source_code else []
+                    
+                    for idx, issue in enumerate(secondary_original.get('issues', []), 1):
+                        check_id = issue.get('check_id', issue.get('message_id', 'N/A'))
+                        description = issue.get('description', issue.get('message', 'Semgrep Issue'))
+                        cwe_raw = issue.get('cwe_id', 'N/A')
+                        cwe_id, cwe_name = parse_cwe_info(cwe_raw)
                         
-                        # Debug info
-                        if not patched_code:
-                            st.warning("⚠️ Code is not available in results")
-                        
-                        # Group issues by (symbol, message_id, description)
-                        grouped_issues = {}
-                        for issue in secondary_patched.get('issues', []):
-                            key = (issue.get('symbol'), issue.get('message_id'), issue.get('description'), issue.get('type'))
-                            if key not in grouped_issues:
-                                grouped_issues[key] = []
-                            line_num = issue.get('line_number')
-                            if line_num is not None:
-                                grouped_issues[key].append(line_num)
-                        
-                        # Display grouped issues
-                        for idx, (key, lines) in enumerate(grouped_issues.items(), 1):
-                            symbol, msg_id, description, issue_type = key
-                            lines = sorted(set(lines))  # Remove duplicates and sort
-                            
-                            # Use description or fallback to symbol if description is missing
-                            display_name = description if description and description != 'Secondary Issue' else symbol
-                            st.markdown(f"**{idx}. {issue_type}: {display_name}**")
-                            st.markdown(f"- **Symbol:** {symbol}")
-                            st.markdown(f"- **Message ID:** {msg_id}")
-                            st.markdown(f"- **Lines:** {', '.join(map(str, lines))}")
-                            
-                            # Show code context for each unique line with arrow pointing to issue
-                            if patched_code and lines:
-                                for line_num in lines:
-                                    try:
-                                        context = get_code_context(patched_code, int(line_num), context_lines=2)
-                                        if context:
-                                            st.code(context, language='python')
-                                        else:
-                                            st.info(f"No code context available for line {line_num}")
-                                    except (ValueError, IndexError, TypeError) as e:
-                                        st.error(f"Error getting context for line {line_num}: {str(e)}")
-                            elif not patched_code:
-                                st.info("Code context unavailable - patched code not found in results")
-                            elif not lines:
-                                st.info("No valid line numbers found")
-                            
-                            st.markdown("---")
-                else:
-                    st.success("✅ No issues found by Semgrep!")
+                        # Get line number from start or end position
+                        line_number = 'Unknown'
+                        if 'start' in issue:
+                            line_number = issue['start'].get('line', 'Unknown')
+                        elif 'end' in issue:
+                            line_number = issue['end'].get('line', 'Unknown')
+                        elif 'line_number' in issue:
+                            line_number = issue.get('line_number', 'Unknown')
+
+                        # Display issue info with CWE
+                        cwe_display = f" [{cwe_id}]" if cwe_id != 'N/A' else ""
+                        st.markdown(f"{idx} : {check_id}")
+                        st.markdown(f"**Description:** {description}")
+                        st.markdown(f"**Line:** {line_number} {cwe_display}")
+
+                        # Show a 3-line window around the vulnerable line with an arrow
+                        if isinstance(line_number, int) and 1 <= line_number <= len(code_lines):
+                            start = max(1, line_number - 1)
+                            end = min(len(code_lines), line_number + 1)
+                            snippet_lines = []
+                            for ln in range(start, end + 1):
+                                prefix = "→" if ln == line_number else " "
+                                safe_line = code_lines[ln - 1].rstrip()
+                                snippet_lines.append(f"{prefix} {ln:>4}: {safe_line}")
+                            if len(snippet_lines) < 3 and end < len(code_lines):
+                                ln = end + 1
+                                safe_line = code_lines[ln - 1].rstrip()
+                                snippet_lines.append(f"  {ln:>4}: {safe_line}")
+                            st.markdown("```python\n" + "\n".join(snippet_lines) + "\n```")
+                        else:
+                            st.warning("⚠️ Code context unavailable for this line")
+
+                        st.markdown("---")
             else:
-                st.error("❌ Semgrep analysis failed")
+                st.success("✅ No issues found by Semgrep in initial code!")
 
         # Combined vulnerability table from original and all patched iterations
         combined_issues = []
 
         bandit_original = results.get('bandit_original', {})
+        secondary_original = results.get('semgrep_original', results.get('secondary_original', {}))
+        patch_iterations = results.get('patch_iterations', [])
         
-        # Add vulnerabilities from original code
+        # Add vulnerabilities from original code - Bandit
         if bandit_original.get('success'):
             for issue in bandit_original.get('issues', []):
-                lines = issue.get('line_number')
-                line_list = [lines] if lines is not None else []
+                line_num = issue.get('line_number', 'Unknown')
                 severity = issue.get('issue_severity') or issue.get('severity', 'UNKNOWN')
                 confidence = issue.get('issue_confidence') or issue.get('confidence', 'UNKNOWN')
+                cwe_raw = issue.get('cwe_id', 'N/A')
+                cwe_id, cwe_name = parse_cwe_info(cwe_raw)
                 combined_issues.append({
-                    'ID': issue.get('test_id', 'N/A'),
-                    'Name': issue.get('issue_text', issue.get('test_name', 'Bandit Issue')),
+                    'CWE ID': cwe_id,
+                    'CWE Name': cwe_name,
                     'Severity': severity,
                     'Confidence': confidence,
-                    'Occurrences': len(line_list) if line_list else 1,
-                    'Found In': 'Original Code',
-                    'Iteration': 'Original'
-                })
-
-        # Add vulnerabilities from patched code
-        if bandit_patched.get('success'):
-            for issue in bandit_patched.get('issues', []):
-                lines = issue.get('line_number')
-                line_list = [lines] if lines is not None else []
-                severity = issue.get('issue_severity') or issue.get('severity', 'UNKNOWN')
-                confidence = issue.get('issue_confidence') or issue.get('confidence', 'UNKNOWN')
-                # Bandit on patched code is from iteration 1 (first patching round)
-                combined_issues.append({
-                    'ID': issue.get('test_id', 'N/A'),
-                    'Name': issue.get('issue_text', issue.get('test_name', 'Bandit Issue')),
-                    'Severity': severity,
-                    'Confidence': confidence,
-                    'Occurrences': len(line_list) if line_list else 1,
-                    'Found In': 'Patched Code (Bandit)',
-                    'Iteration': '1'
-                })
-
-        # Add vulnerabilities from secondary tool (Semgrep) on patched code
-        if secondary_patched.get('success'):
-            for issue in secondary_patched.get('issues', []):
-                lines = issue.get('line_number')
-                line_list = lines if isinstance(lines, list) else ([lines] if lines is not None else [])
-                combined_issues.append({
-                    'ID': issue.get('message_id', issue.get('symbol', 'N/A')),
-                    'Name': issue.get('description', 'Secondary Issue'),
-                    'Severity': issue.get('type', issue.get('severity', 'UNKNOWN')),
-                    'Confidence': issue.get('confidence', issue.get('severity', 'UNKNOWN')),
-                    'Occurrences': len(line_list) if line_list else 1,
-                    'Found In': 'Patched Code (Semgrep)',
-                    'Iteration': '1'
+                    'Line Number': line_num
                 })
 
         if combined_issues:
-            st.markdown("### 🔴 Detected Vulnerabilities ")
+            st.markdown("### 🔴 Detected Vulnerabilities - Bandit")
+            st.info("ℹ️ This table shows the vulnerabilities identified by Bandit tool in the initial source code. For patching iteration verbosity, please refer to the report section.")
             # Add SL.No column and remove default index
             df = pd.DataFrame(combined_issues)
             df.insert(0, 'SL.No', range(1, len(df) + 1))
             st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Display Semgrep issues table below Detected Vulnerabilities
+            if semgrep_original_count > 0:
+                st.info("ℹ️ This table shows the vulnerabilities identified by Semgrep tool in the initial source code. For patching iteration verbosity, please refer to the report section.")
+                semgrep_issues_data = []
+                for idx, issue in enumerate(secondary_original.get('issues', []), 1):
+                    # Get line number from start or end position
+                    line_num = 'Unknown'
+                    if 'start' in issue:
+                        line_num = issue['start'].get('line', 'Unknown')
+                    elif 'end' in issue:
+                        line_num = issue['end'].get('line', 'Unknown')
+                    elif 'line_number' in issue:
+                        line_num = issue.get('line_number', 'Unknown')
+                    
+                    cwe_raw = issue.get('cwe_id', 'N/A')
+                    cwe_id, cwe_name = parse_cwe_info(cwe_raw)
+                    
+                    # Build row with available fields (without Type column)
+                    row = {
+                        'SL.No': idx,
+                        'CWE ID': cwe_id,
+                        'CWE Name': cwe_name,
+                        'Line Number': line_num
+                    }
+                    
+                    # Add severity if available
+                    if 'severity' in issue:
+                        row['Type'] = issue.get('severity', 'UNKNOWN')
+                    
+                    # Add confidence if available
+                    if 'confidence' in issue:
+                        row['Confidence'] = issue.get('confidence', 'UNKNOWN')
+                    
+                    semgrep_issues_data.append(row)
+                
+                # Display table with available columns
+                if semgrep_issues_data:
+                    st.dataframe(pd.DataFrame(semgrep_issues_data), use_container_width=True, hide_index=True)
 
         # Get metrics early for use in cross-validation section
         metrics = results.get('metrics', {})
         
         # Tool Comparison and Cross-Validation
         st.markdown("### 🔄 Analysis Summary")
-        st.markdown("_Total vulnerabilities from all detection tools across all iterations_")
+        st.info("_Total vulnerabilities from all detection tools across all iterations_")
         
         col_compare1, col_compare2 = st.columns(2)
         
         with col_compare1:
-            with st.expander("📊 Total Vulnerabilities Detected"):
-                st.markdown("**Across All Iterations (Custom Detector, Bandit, Semgrep):**")
-                total_detected = metrics.get('total_detected', 0)
-                custom_initial = metrics.get('custom_detector_initial', 0)
-                bandit_initial = metrics.get('bandit_initial', 0)
-                semgrep_initial = metrics.get('semgrep_initial', 0)
+            with st.expander("📊 Total Vulnerabilities Detected"):                
+                total_detected = (
+                    metrics.get('total_detected_all_occurrences')
+                    or results.get('total_vulns_found_all_occurrences')
+                    or len(results.get('all_found_vulns_occurrences', []))
+                    or metrics.get('total_detected', 0)
+                )
+                custom_total = results.get('total_custom_count', 0)
+                bandit_total = results.get('total_bandit_count', 0)
+                semgrep_total = results.get('total_semgrep_count', 0)
                 total_remaining = metrics.get('total_remaining', 0)
-                
+
                 st.write(f"- Total detected: **{total_detected}** vulnerabilities")
-                st.write(f"- Custom Detector: **{custom_initial}**")
-                st.write(f"- Bandit: **{bandit_initial}**")
-                st.write(f"- Semgrep: **{semgrep_initial}**")
+                st.write(f"- Custom Detector: **{custom_total}**")
+                st.write(f"- Bandit: **{bandit_total}**")
+                st.write(f"- Semgrep: **{semgrep_total}**")
                 st.write(f"\n**Total Remaining: {total_remaining}**")
         
-        with col_compare2:
-            with st.expander("✅ Issues Resolved by Patching"):
-                total_fixed = metrics.get('total_fixed', 0)
-                
-                st.markdown("**Issues Fixed Across All Iterations:**")
-                st.write(f"- Total fixed by system: **{total_fixed}**")
-                
-                if total_detected > 0:
-                    fix_percentage = (total_fixed / total_detected) * 100
-                    st.metric("Overall Fix Rate", f"{fix_percentage:.1f}%")
-                else:
-                    st.metric("Overall Fix Rate", "N/A")
         
         # Metrics
         st.markdown("### 📊 Effectiveness Metrics")
@@ -1132,8 +1017,9 @@ class App:
             st.markdown("#### Tool Comparison")
             comp_rows = [{
                 'Sl.No': 1,
-                'Bandit Issues': tool_comp.get('primary_tool_issues', 0),
-                'Semgrep Issues': tool_comp.get('secondary_tool_issues', 0),
+                'Custom Detector Total': results.get('total_custom_count', 0),
+                'Bandit Total': results.get('total_bandit_count', 0),
+                'Semgrep Total': results.get('total_semgrep_count', 0),
                 'Overlapping Detections': tool_comp.get('overlapping_detections', 0),
                 'Overlap Rate': f"{tool_comp.get('overlap_rate', 0):.1%}"
             }]
@@ -1144,7 +1030,7 @@ class App:
         final_reports = results.get('final_reports', {})
         
         if final_reports:
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             
             with col1:
                 if final_reports.get('metrics') and os.path.exists(final_reports['metrics']):
@@ -1167,7 +1053,487 @@ class App:
                             mime='text/html',
                             key='download_html'
                         )
+            
+            with col3:
+                # Generate iteration-focused report
+                iteration_report_html = self._generate_iteration_report(results)
+                st.download_button(
+                    label="🔄 Download Iteration Report (HTML)",
+                    data=iteration_report_html,
+                    file_name=f"iteration_report_{results.get('workflow_id', 'unknown')}.html",
+                    mime='text/html',
+                    key='download_iteration_report'
+                )
         
+    def _generate_iteration_report(self, results: dict) -> str:
+        """Generate comprehensive HTML report focused on iteration analysis."""
+        patch_iterations = results.get('patch_iterations', [])
+        metrics = results.get('metrics', {})
+        
+        # Get the total vulnerabilities found in iterations from metrics
+        total_all_tools = metrics.get('all_iterations_deduped_count', 0)
+        
+        # Count vulnerabilities by tool across all iterations
+        custom_total = 0
+        bandit_total = 0
+        semgrep_total = 0
+        
+        # Store vulnerabilities organized by iteration and tool
+        iterations_data = {}
+        
+        # Collect all vulnerabilities from iterations only
+        for idx, iteration in enumerate(patch_iterations, 1):
+            iter_code = iteration.get('patched_code', '')
+            iterations_data[idx] = {
+                'code': iter_code,
+                'custom_detector': [],
+                'bandit': [],
+                'semgrep': []
+            }
+            
+            # Custom detector vulnerabilities in this iteration
+            # Check for vulnerabilities key first, then custom_detector_vulns
+            custom_vulns = []
+            if 'vulnerabilities' in iteration:
+                custom_vulns = iteration['vulnerabilities']
+            elif 'custom_detector_vulns' in iteration:
+                # Convert from the stored format to list format
+                for (cwe_id, cwe_name), vuln_info in iteration['custom_detector_vulns'].items():
+                    for line in vuln_info.get('lines', []):
+                        custom_vulns.append({
+                            'cwe_id': cwe_id,
+                            'cwe_name': cwe_name,
+                            'line_number': line,
+                            'severity': 'HIGH',
+                            'remediation_priority': 'HIGH'
+                        })
+            
+            for v in custom_vulns:
+                custom_total += 1
+                iterations_data[idx]['custom_detector'].append({
+                    'id': f"CWE-{v.get('cwe_id')}",
+                    'name': v.get('cwe_name', 'Unknown'),
+                    'severity': v.get('severity', 'UNKNOWN'),
+                    'line': v.get('line_number', 'Unknown'),
+                    'priority': v.get('remediation_priority', 'MEDIUM'),
+                    'snippet': v.get('code_snippet', '')
+                })
+            
+            # Bandit vulnerabilities in this iteration
+            bandit_analysis = iteration.get('bandit_analysis', {})
+            print(f"[DEBUG] Iteration {idx} bandit_analysis: {bandit_analysis}")
+            if bandit_analysis.get('success'):
+                for issue in bandit_analysis.get('issues', []):
+                    bandit_total += 1
+                    # Bandit uses 'severity' not 'issue_severity'
+                    severity = issue.get('severity', issue.get('issue_severity', 'MEDIUM'))
+                    cwe_raw = issue.get('cwe_id', 'N/A')
+                    cwe_id, cwe_name = parse_cwe_info(cwe_raw)
+                    iterations_data[idx]['bandit'].append({
+                        'id': issue.get('test_id', 'N/A'),
+                        'name': issue.get('test_name', issue.get('description', 'Bandit Issue')),
+                        'cwe_id': cwe_id,
+                        'cwe_name': cwe_name,
+                        'severity': severity,
+                        'line': issue.get('line_number', 'Unknown'),
+                        'priority': 'HIGH' if severity == 'HIGH' else 'MEDIUM'
+                    })
+            
+            # Semgrep vulnerabilities in this iteration
+            semgrep_analysis = iteration.get('semgrep_analysis', {})
+            print(f"[DEBUG] Iteration {idx} semgrep_analysis: {semgrep_analysis}")
+            if semgrep_analysis.get('success'):
+                for issue in semgrep_analysis.get('issues', []):
+                    semgrep_total += 1
+                    # Semgrep uses 'check_id' and 'start'/'end' for line numbers
+                    line_num = 'Unknown'
+                    if 'start' in issue:
+                        line_num = issue['start'].get('line', 'Unknown')
+                    elif 'line_number' in issue:
+                        line_num = issue.get('line_number', 'Unknown')
+                    
+                    severity = issue.get('severity', 'UNKNOWN')
+                    cwe_raw = issue.get('cwe_id', 'N/A')
+                    cwe_id, cwe_name = parse_cwe_info(cwe_raw)
+                    iterations_data[idx]['semgrep'].append({
+                        'id': issue.get('check_id', issue.get('message_id', issue.get('symbol', 'N/A'))),
+                        'name': issue.get('message', 'Semgrep Issue'),
+                        'cwe_id': cwe_id,
+                        'cwe_name': cwe_name,
+                        'severity': severity,
+                        'line': line_num,
+                        'priority': 'HIGH' if severity in ['HIGH', 'CRITICAL'] else 'MEDIUM'
+                    })
+        
+        # Calculate total as sum of all tool counts
+        total_all_tools = custom_total + bandit_total + semgrep_total
+        
+        # Debug output to understand what's being collected
+        print(f"\n[DEBUG Iteration Report] Custom total: {custom_total}, Bandit total: {bandit_total}, Semgrep total: {semgrep_total}")
+        print(f"[DEBUG Iteration Report] Total (sum): {total_all_tools}")
+        print(f"[DEBUG Iteration Report] Iterations data: {iterations_data}")
+        for iter_num, iter_data in iterations_data.items():
+            print(f"[DEBUG] Iteration {iter_num}: {len(iter_data['custom_detector'])} custom, {len(iter_data['bandit'])} bandit, {len(iter_data['semgrep'])} semgrep")
+        
+        # Generate HTML
+        html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Iteration Analysis Report</title>
+    <style>
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 2.5em;
+        }}
+        .summary-section {{
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .metric-container {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }}
+        .metric-box {{
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }}
+        .metric-box.custom {{
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }}
+        .metric-box.bandit {{
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+        }}
+        .metric-box.semgrep {{
+            background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);
+        }}
+        .metric-value {{
+            font-size: 3em;
+            font-weight: bold;
+            margin: 10px 0;
+        }}
+        .metric-label {{
+            font-size: 1.1em;
+            opacity: 0.9;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            margin-top: 20px;
+        }}
+        th {{
+            background: #667eea;
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }}
+        td {{
+            padding: 12px 15px;
+            border-bottom: 1px solid #e0e0e0;
+        }}
+        tr:hover {{
+            background-color: #f8f9fa;
+        }}
+        .severity-HIGH, .severity-CRITICAL {{
+            background-color: #dc3545;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+        }}
+        .severity-MEDIUM {{
+            background-color: #ffc107;
+            color: #333;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+        }}
+        .severity-LOW {{
+            background-color: #28a745;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+        }}
+        .code-section {{
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .code-block {{
+            background: #282c34;
+            color: #abb2bf;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            margin-top: 15px;
+        }}
+        .code-line {{
+            white-space: pre;
+        }}
+        .code-line-highlight {{
+            background-color: #e74c3c;
+            color: white;
+            display: block;
+            margin: 0 -20px;
+            padding: 0 20px;
+        }}
+        .arrow {{
+            color: #f39c12;
+            font-weight: bold;
+            margin-right: 5px;
+        }}
+        .iteration-header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            margin: 30px 0 20px 0;
+            font-size: 1.5em;
+            font-weight: bold;
+        }}
+        .tool-header {{
+            background: #f8f9fa;
+            padding: 15px;
+            border-left: 4px solid #667eea;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }}
+        .no-vulns {{
+            color: #28a745;
+            font-style: italic;
+            padding: 10px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔄 Iteration Analysis Report</h1>
+        <p>Vulnerabilities identified in patching iterations</p>
+    </div>
+    
+    <div class="summary-section">
+        <h2>📊 Total Vulnerabilities Found in Iterations</h2>
+        <div class="metric-container">
+            <div class="metric-box">
+                <div class="metric-label">Total Vulnerabilities</div>
+                <div class="metric-value">{total_all_tools}</div>
+                <div class="metric-label">All Tools Combined</div>
+            </div>
+            <div class="metric-box custom">
+                <div class="metric-label">Custom Detector</div>
+                <div class="metric-value">{custom_total}</div>
+                <div class="metric-label">Issues Found</div>
+            </div>
+            <div class="metric-box bandit">
+                <div class="metric-label">Bandit</div>
+                <div class="metric-value">{bandit_total}</div>
+                <div class="metric-label">Issues Found</div>
+            </div>
+            <div class="metric-box semgrep">
+                <div class="metric-label">Semgrep</div>
+                <div class="metric-value">{semgrep_total}</div>
+                <div class="metric-label">Issues Found</div>
+            </div>
+        </div>
+    </div>
+"""
+        
+        # Add each iteration with its vulnerabilities
+        for iter_num, iter_data in iterations_data.items():
+            iter_code = iter_data['code']
+            custom_vulns = iter_data['custom_detector']
+            bandit_vulns = iter_data['bandit']
+            semgrep_vulns = iter_data['semgrep']
+
+            # Skip rendering this iteration if no vulnerabilities were found
+            if not (custom_vulns or bandit_vulns or semgrep_vulns):
+                continue
+
+            # Collect all line numbers with vulnerabilities
+            vuln_lines = set()
+            for v in custom_vulns + bandit_vulns + semgrep_vulns:
+                try:
+                    vuln_lines.add(int(v['line']))
+                except (ValueError, TypeError):
+                    pass
+
+            html += f"""
+    <div class="code-section">
+        <div class="iteration-header">🔄 Iteration {iter_num} - Patched Code</div>
+        
+        <div class="tool-header">Custom Detector - {len(custom_vulns)} Issue(s)</div>
+"""
+            if custom_vulns:
+                html += """
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Severity</th>
+                    <th>Line</th>
+                    <th>Priority</th>
+                </tr>
+            </thead>
+            <tbody>
+"""
+                for vuln in custom_vulns:
+                    html += f"""
+                <tr>
+                    <td><strong>{vuln['id']}</strong></td>
+                    <td>{vuln['name']}</td>
+                    <td><span class="severity-{vuln['severity']}">{vuln['severity']}</span></td>
+                    <td>{vuln['line']}</td>
+                    <td>{vuln['priority']}</td>
+                </tr>
+"""
+                html += """
+            </tbody>
+        </table>
+"""
+            else:
+                html += """<p class="no-vulns">✅ No vulnerabilities found</p>
+"""
+            
+            html += f"""
+        <div class="tool-header">Bandit - {len(bandit_vulns)} Issue(s)</div>
+"""
+            if bandit_vulns:
+                html += """
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Severity</th>
+                    <th>Line</th>
+                    <th>Priority</th>
+                </tr>
+            </thead>
+            <tbody>
+"""
+                for vuln in bandit_vulns:
+                    html += f"""
+                <tr>
+                    <td><strong>{vuln['id']}</strong></td>
+                    <td>{vuln['name']}</td>
+                    <td><span class="severity-{vuln['severity']}">{vuln['severity']}</span></td>
+                    <td>{vuln['line']}</td>
+                    <td>{vuln['priority']}</td>
+                </tr>
+"""
+                html += """
+            </tbody>
+        </table>
+"""
+            else:
+                html += """<p class="no-vulns">✅ No vulnerabilities found</p>
+"""
+            
+            html += f"""
+        <div class="tool-header">Semgrep - {len(semgrep_vulns)} Issue(s)</div>
+"""
+            if semgrep_vulns:
+                html += """
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Severity</th>
+                    <th>Line</th>
+                    <th>Priority</th>
+                </tr>
+            </thead>
+            <tbody>
+"""
+                for vuln in semgrep_vulns:
+                    html += f"""
+                <tr>
+                    <td><strong>{vuln['id']}</strong></td>
+                    <td>{vuln['name']}</td>
+                    <td><span class="severity-{vuln['severity']}">{vuln['severity']}</span></td>
+                    <td>{vuln['line']}</td>
+                    <td>{vuln['priority']}</td>
+                </tr>
+"""
+                html += """
+            </tbody>
+        </table>
+"""
+            else:
+                html += """<p class="no-vulns">✅ No vulnerabilities found</p>
+"""
+            
+            # Add code display with highlighted lines
+            html += """
+        <div style="margin-top: 20px;">
+            <h4>Code with Highlighted Vulnerabilities:</h4>
+            <div class="code-block">
+"""
+            # Split code into lines, handling various line ending scenarios
+            code_lines_list = iter_code.split('\n')
+            # Remove trailing empty line if present (caused by trailing newline)
+            if code_lines_list and code_lines_list[-1] == '':
+                code_lines_list = code_lines_list[:-1]
+            
+            for line_num, line in enumerate(code_lines_list, 1):
+                if line_num in vuln_lines:
+                    escaped_line = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    html += f'<div class="code-line code-line-highlight"><span class="arrow">→</span>{line_num:>4}: {escaped_line}</div>\n'
+                else:
+                    escaped_line = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    html += f'<div class="code-line">  {line_num:>4}: {escaped_line}</div>\n'
+            html += """
+            </div>
+        </div>
+    </div>
+"""
+        
+        html += """
+</body>
+</html>
+"""
+        
+        return html
+    
     def run(self):
         self.render_api_input()
         if st.session_state.api_loaded:

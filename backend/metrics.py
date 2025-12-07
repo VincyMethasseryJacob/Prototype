@@ -199,7 +199,9 @@ class MetricsCalculator:
         detected_vulns: List[Dict],
         vulns_after_patch: List[Dict],
         primary_tool_results: Dict,
-        secondary_tool_results: Dict
+        secondary_tool_results: Dict,
+        initial_code_deduped_count: int = 0,
+        all_iterations_deduped_count: int = 0
     ) -> Dict:
         """
         Calculate comprehensive metrics for the entire workflow.
@@ -208,6 +210,14 @@ class MetricsCalculator:
         Note: 'detected_vulns' should represent ALL findings across all iterations
         and tools (custom, Bandit, Semgrep). 'vulns_after_patch' should represent
         the remaining findings on the final patched code from all tools.
+        
+        Args:
+            detected_vulns: All vulnerabilities found across all tools and iterations
+            vulns_after_patch: Remaining vulnerabilities after patching
+            primary_tool_results: Bandit results
+            secondary_tool_results: Semgrep results
+            initial_code_deduped_count: Unique vulnerabilities in initial code (by CWE+line)
+            all_iterations_deduped_count: Unique vulnerabilities across all iterations (by CWE+line)
         
         Returns:
             Dict with all metrics combined
@@ -246,7 +256,9 @@ class MetricsCalculator:
             'custom_detector_initial': custom_detector_count,
             'bandit_remaining': bandit_count,
             'semgrep_remaining': semgrep_count,
-            'overall_success_rate': patching_metrics.get('effectiveness_score', 0.0)
+            'overall_success_rate': patching_metrics.get('effectiveness_score', 0.0),
+            'initial_code_deduped_count': initial_code_deduped_count,
+            'all_iterations_deduped_count': all_iterations_deduped_count
         }
 
 

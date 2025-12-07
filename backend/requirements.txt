@@ -2,7 +2,7 @@
 
 # Static Analysis Tools
 bandit>=1.7.5
-pylint>=3.0.0
+semgrep>=1.0.0
 
 # Code Analysis
 astroid>=3.0.0

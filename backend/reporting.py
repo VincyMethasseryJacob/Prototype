@@ -297,18 +297,18 @@ class VulnerabilityReporter:
         <div class="metric-grid">
             <div class="metric-card">
                 <h3>Custom Detector</h3>
-                <div class="value">{metrics.get('custom_detector_initial', 0)}</div>
-                <p>Initial Detection</p>
+                <div class="value">{metrics.get('custom_detector_total_all_occurrences', 0)}</div>
+                <p>Total Custom Detector Found</p>
             </div>
-            <div class="metric-card warning">
-                <h3>Bandit (Remaining)</h3>
-                <div class="value">{metrics.get('bandit_remaining', 0)}</div>
-                <p>In Patched Code</p>
+            <div class="metric-card">
+                <h3>Bandit</h3>
+                <div class="value">{metrics.get('bandit_total_all_occurrences', 0)}</div>
+                <p>Total Bandit Found</p>
             </div>
-            <div class="metric-card warning">
-                <h3>Semgrep (Remaining)</h3>
-                <div class="value">{metrics.get('semgrep_remaining', 0)}</div>
-                <p>In Patched Code</p>
+            <div class="metric-card">
+                <h3>Semgrep</h3>
+                <div class="value">{metrics.get('semgrep_total_all_occurrences', 0)}</div>
+                <p>Total Semgrep Found</p>
             </div>
             <div class="metric-card info">
                 <h3>Effectiveness</h3>
@@ -318,6 +318,10 @@ class VulnerabilityReporter:
         </div>
         
         <h2>Severity Distribution</h2>
+        <p style="color: #7f8c8d; margin: 10px 0 20px 0; font-size: 14px;">
+            <strong>Total Detected:</strong> All vulnerabilities found across all phases (initial + iterations)<br>
+            <strong>Remaining Unfixed:</strong> Vulnerabilities still present after all patching attempts (shows 0 if code is fully patched)
+        </p>
         <div class="chart-container">
             <canvas id="severityChart"></canvas>
         </div>
@@ -339,7 +343,7 @@ class VulnerabilityReporter:
         new Chart(severityCtx, {{
             type: 'bar',
             data: {{
-                labels: ['Before Patching', 'After Patching'],
+                labels: ['Total Detected', 'Remaining Unfixed'],
                 datasets: [{{
                     label: 'High Severity',
                     data: [{severity_before.get('HIGH', 0)}, {severity_after.get('HIGH', 0)}],
@@ -357,7 +361,7 @@ class VulnerabilityReporter:
             options: {{
                 responsive: true,
                 plugins: {{
-                    title: {{ display: true, text: 'Vulnerability Severity Before and After Patching' }},
+                    title: {{ display: true, text: 'Vulnerability Severity: All Detected vs. Remaining Unfixed' }},
                     legend: {{ position: 'top' }}
                 }},
                 scales: {{
@@ -371,21 +375,20 @@ class VulnerabilityReporter:
         new Chart(toolCtx, {{
             type: 'doughnut',
             data: {{
-                labels: ['Custom Detector Only', 'Bandit Only', 'Semgrep Only', 'Overlap (All Tools)'],
+                labels: ['Custom Detector', 'Bandit', 'Semgrep'],
                 datasets: [{{
                     data: [
-                        {tc.get('custom_only', 0)},
-                        {tc.get('bandit_only', 0)},
-                        {tc.get('semgrep_only', 0)},
-                        {tc.get('overlap', 0)}
+                        {metrics.get('custom_detector_total_all_occurrences', 0)},
+                        {metrics.get('bandit_total_all_occurrences', 0)},
+                        {metrics.get('semgrep_total_all_occurrences', 0)}
                     ],
-                    backgroundColor: ['#3498db', '#9b59b6', '#e67e22', '#2ecc71']
+                    backgroundColor: ['#3498db', '#9b59b6', '#e67e22']
                 }}]
             }},
             options: {{
                 responsive: true,
                 plugins: {{
-                    title: {{ display: true, text: 'Detection Tool Coverage' }},
+                    title: {{ display: true, text: 'Vulnerabilities Detected by Each Tool (All Phases)' }},
                     legend: {{ position: 'right' }}
                 }}
             }}
@@ -399,8 +402,8 @@ class VulnerabilityReporter:
                 labels: ['Fixed', 'Remaining'],
                 datasets: [{{
                     data: [
-                        {pe.get('fixed_count', 0)},
-                        {pe.get('remaining_count', 0)}
+                        {pe.get('vulnerabilities_fixed', 0)},
+                        {pe.get('vulnerabilities_remaining', 0)}
                     ],
                     backgroundColor: ['#27ae60', '#e74c3c']
                 }}]
