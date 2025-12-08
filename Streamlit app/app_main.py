@@ -601,7 +601,7 @@ class App:
             st.warning("⚠️ Some vulnerabilities remain after patching.")
         
         # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             # Total detected = custom (initial) + bandit (initial) + semgrep (initial) + all iteration findings
             initial_custom = results.get('metrics', {}).get('custom_detector_initial', 0)
@@ -616,11 +616,15 @@ class App:
             )
             st.metric("Total Vulnerabilities Found", total_detected)
         with col2:
+            # Unique vulnerabilities (deduplicated across all phases)
+            unique_detected = metrics_obj.get('total_detected', 0)
+            st.metric("Unique Vulnerabilities", unique_detected)
+        with col3:
             total_fixed = results.get('metrics', {}).get('total_fixed', 0)
             st.metric("Total Vulnerabilities Fixed", total_fixed)
-        with col3:
-            st.metric("Patch Iterations", results.get('total_iterations', 0))
         with col4:
+            st.metric("Patch Iterations", results.get('total_iterations', 0))
+        with col5:
             success_rate = results.get('metrics', {}).get('overall_success_rate', 0)
             st.metric("Success Rate", f"{success_rate:.1%}")
         
@@ -762,6 +766,202 @@ class App:
             st.code(_add_line_numbers(cleaned_code), language='python')
         else:
             st.info("No code available to display.")
+
+        # Vulnerability fix summary (fixed vs remaining)
+        st.markdown("### 🛡️ Vulnerability Fix Summary")
+
+        def _normalize_cwe(cwe_raw):
+            cwe_id, _ = parse_cwe_info(cwe_raw)
+            return cwe_id or "N/A"
+
+        def _normalize_line(entry):
+            line_val = entry.get('line') or entry.get('line_number') or entry.get('start', {}).get('line')
+            try:
+                return int(line_val) if line_val not in (None, "") else "Unknown"
+            except Exception:
+                return line_val or "Unknown"
+
+        def _friendly_source(src: str) -> str:
+            src = (src or "custom").lower()
+            if src in {"bandit", "semgrep", "custom"}:
+                return src
+            return "custom"
+
+        def _convert_bandit_remaining(bandit_result: dict) -> list:
+            items = []
+            if bandit_result and bandit_result.get('success'):
+                for issue in bandit_result.get('issues', []):
+                    items.append({
+                        'cwe_id': _normalize_cwe(issue.get('cwe_id', 'N/A')),
+                        'line': issue.get('line_number'),
+                        'detection_method': 'bandit',
+                        'description': issue.get('issue_text', issue.get('test_name', 'Bandit issue'))
+                    })
+            return items
+
+        def _convert_semgrep_remaining(semgrep_result: dict) -> list:
+            items = []
+            if semgrep_result and semgrep_result.get('success'):
+                for issue in semgrep_result.get('issues', []):
+                    line_number = None
+                    if 'start' in issue:
+                        line_number = issue['start'].get('line')
+                    elif 'end' in issue:
+                        line_number = issue['end'].get('line')
+                    elif 'line_number' in issue:
+                        line_number = issue.get('line_number')
+                    items.append({
+                        'cwe_id': _normalize_cwe(issue.get('cwe_id', 'N/A')),
+                        'line': line_number,
+                        'detection_method': 'semgrep',
+                        'description': issue.get('message', issue.get('description', 'Semgrep issue'))
+                    })
+            return items
+
+        # All occurrences across initial and iterations (prefer total list when available)
+        all_occurrences = (
+            results.get('all_found_vulns_total')
+            or results.get('all_found_vulns_occurrences')
+            or results.get('all_found_vulns_initial')
+            or []
+        )
+
+        # Count per CWE and tool; keep only CWEs seen by all three tools
+        cwe_tool_counts = {}
+        for occ in all_occurrences:
+            cwe_id = _normalize_cwe(occ.get('cwe_id', 'N/A'))
+            tool = _friendly_source(occ.get('detection_method') or occ.get('source'))
+            if cwe_id == 'N/A':
+                continue
+            bucket = cwe_tool_counts.setdefault(cwe_id, {'custom': 0, 'bandit': 0, 'semgrep': 0})
+            if tool in bucket:
+                bucket[tool] += 1
+
+        # Remaining vulnerabilities (final state)
+        remaining_raw = []
+        patch_iterations = results.get('patch_iterations', []) or []
+        if patch_iterations:
+            remaining_raw.extend(patch_iterations[-1].get('unpatched_vulns', []))
+        remaining_raw.extend(_convert_bandit_remaining(results.get('bandit_final', {})))
+        remaining_raw.extend(_convert_semgrep_remaining(results.get('secondary_final', results.get('semgrep_final', {}))))
+
+        remaining_map = {}
+        for rem in remaining_raw:
+            cwe_id = _normalize_cwe(rem.get('cwe_id', 'N/A'))
+            line_num = _normalize_line(rem)
+            key = (cwe_id, line_num)
+            entry = remaining_map.setdefault(key, {
+                'cwe_id': cwe_id,
+                'line': line_num,
+                'methods': set(),
+                'description': rem.get('description', '')
+            })
+            entry['methods'].add(_friendly_source(rem.get('detection_method') or rem.get('source')))
+
+        remaining_counts = {}
+        for key, data in remaining_map.items():
+            remaining_counts.setdefault(data['cwe_id'], {'count': 0, 'methods': set(), 'description': data.get('description', '')})
+            remaining_counts[data['cwe_id']]['count'] += 1
+            remaining_counts[data['cwe_id']]['methods'].update(data['methods'])
+
+        fixed_rows = []
+        for cwe_id, tool_counts in cwe_tool_counts.items():
+            total_occ = tool_counts['custom'] + tool_counts['bandit'] + tool_counts['semgrep']
+            remaining_for_cwe = remaining_counts.get(cwe_id, {'count': 0})['count']
+            fixed_count = max(0, total_occ - remaining_for_cwe)
+            if fixed_count <= 0:
+                continue
+            
+            # Build identified text with tool counts
+            tools_found = []
+            if tool_counts['custom'] > 0:
+                tools_found.append(f"Custom ({tool_counts['custom']})")
+            if tool_counts['bandit'] > 0:
+                tools_found.append(f"Bandit ({tool_counts['bandit']})")
+            if tool_counts['semgrep'] > 0:
+                tools_found.append(f"Semgrep ({tool_counts['semgrep']})")
+            
+            # Indicate if all 3 tools found it
+            all_three = all(tool_counts[t] > 0 for t in ['custom', 'bandit', 'semgrep'])
+            identified_text = ", ".join(tools_found)
+            if all_three:
+                identified_text = "✓ All 3 tools: " + identified_text
+            
+            fixed_rows.append({
+                'CWE': cwe_id,
+                'Occurrences': total_occ,
+                'Identified By': identified_text
+            })
+
+        unfixed_rows = []
+        for cwe_id, rem in remaining_counts.items():
+            tool_counts = cwe_tool_counts.get(cwe_id, {'custom': 0, 'bandit': 0, 'semgrep': 0})
+            
+            # Build identified text with tool counts
+            tools_found = []
+            if tool_counts['custom'] > 0:
+                tools_found.append(f"Custom ({tool_counts['custom']})")
+            if tool_counts['bandit'] > 0:
+                tools_found.append(f"Bandit ({tool_counts['bandit']})")
+            if tool_counts['semgrep'] > 0:
+                tools_found.append(f"Semgrep ({tool_counts['semgrep']})")
+            
+            # Indicate if all 3 tools found it
+            all_three = all(tool_counts[t] > 0 for t in ['custom', 'bandit', 'semgrep'])
+            identified_text = ", ".join(tools_found) if tools_found else "Unknown"
+            if all_three:
+                identified_text = "✓ All 3 tools: " + identified_text
+            
+            unfixed_rows.append({
+                'CWE': cwe_id,
+                'Remaining Occurrences': rem['count'],
+                'Identified By': identified_text
+            })
+
+        total_remaining_overall = len(remaining_map)
+
+        col_fixed, col_unfixed = st.columns(2)
+        with col_fixed:
+            with st.expander(f"✅ Fixed Vulnerabilities ({len(fixed_rows)})", expanded=False):
+                if fixed_rows:
+                    st.dataframe(pd.DataFrame(fixed_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.success("No fixed vulnerabilities to display.")
+        with col_unfixed:
+            with st.expander(f"⚠️ Remaining Vulnerabilities ({total_remaining_overall})", expanded=False):
+                if remaining_map:
+                    # Show each remaining vulnerability with CWE, line, and code
+                    cleaned_code = results.get('cleaned_code', '')
+                    final_code = results.get('final_patched_code', cleaned_code)
+                    code_lines = final_code.split('\n') if final_code else []
+                    
+                    for idx, (key, data) in enumerate(remaining_map.items(), 1):
+                        cwe_id = data['cwe_id']
+                        line_num = data['line']
+                        cwe_name = get_cwe_name(cwe_id.replace('CWE-', '')) if cwe_id != 'N/A' else 'Unknown'
+                        
+                        st.markdown(f"**{idx}. {cwe_id}: {cwe_name}** (Line {line_num})")
+                        
+                        # Show code context (3 lines: before, target, after)
+                        try:
+                            line_idx = int(line_num) - 1
+                            start = max(0, line_idx - 1)
+                            end = min(len(code_lines), line_idx + 2)
+                            
+                            snippet_lines = []
+                            for ln in range(start, end):
+                                prefix = "→" if (ln + 1) == int(line_num) else " "
+                                safe_line = code_lines[ln].rstrip() if ln < len(code_lines) else ""
+                                snippet_lines.append(f"{prefix} {ln + 1:>4}: {safe_line}")
+                            
+                            if snippet_lines:
+                                st.code("\n".join(snippet_lines), language='python')
+                        except (ValueError, TypeError, IndexError):
+                            st.warning("⚠️ Code context unavailable for this line")
+                        
+                        st.markdown("---")
+                else:
+                    st.success("All identified vulnerabilities were fixed.")
         
         # Static Analysis Results - Initial Code Only
         st.markdown("### 🔬 Static Analysis Results")
@@ -1006,8 +1206,8 @@ class App:
                 'Sl.No': 1,
                 'Fix Rate': f"{patching_eff.get('fix_rate', 0):.1%}",
                 'Effectiveness Score': f"{patching_eff.get('effectiveness_score', 0):.1%}",
-                'Vulnerabilities Fixed': patching_eff.get('vulnerabilities_fixed', 0),
-                'Vulnerabilities Remaining': patching_eff.get('vulnerabilities_remaining', 0)
+                'Vulnerabilities Fixed': metrics.get('total_fixed', 0),
+                'Vulnerabilities Remaining': metrics.get('total_remaining_all_occurrences', 0)
             }]
             st.table(pd.DataFrame(eff_rows).set_index('Sl.No'))
 
@@ -1369,6 +1569,72 @@ class App:
                 <div class="metric-label">Issues Found</div>
             </div>
         </div>
+        
+        <h2>🔍 All CWEs Identified by Each Tool</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>CWE ID</th>
+                    <th>CWE Name</th>
+                    <th>Identified By</th>
+                    <th>Occurrences</th>
+                </tr>
+            </thead>
+            <tbody>
+"""
+        
+        # Build CWE summary table (all CWEs found across all iterations by all tools)
+        cwe_summary = {}
+        for iter_num, iter_data in iterations_data.items():
+            for vuln in iter_data['custom_detector']:
+                cwe_id = vuln['id']
+                cwe_name = vuln['name']
+                key = (cwe_id, cwe_name)
+                if key not in cwe_summary:
+                    cwe_summary[key] = {'custom': 0, 'bandit': 0, 'semgrep': 0}
+                cwe_summary[key]['custom'] += 1
+            
+            for vuln in iter_data['bandit']:
+                cwe_id = vuln.get('cwe_id', 'N/A')
+                cwe_name = vuln.get('cwe_name', 'Unknown')
+                key = (cwe_id, cwe_name)
+                if key not in cwe_summary:
+                    cwe_summary[key] = {'custom': 0, 'bandit': 0, 'semgrep': 0}
+                cwe_summary[key]['bandit'] += 1
+            
+            for vuln in iter_data['semgrep']:
+                cwe_id = vuln.get('cwe_id', 'N/A')
+                cwe_name = vuln.get('cwe_name', 'Unknown')
+                key = (cwe_id, cwe_name)
+                if key not in cwe_summary:
+                    cwe_summary[key] = {'custom': 0, 'bandit': 0, 'semgrep': 0}
+                cwe_summary[key]['semgrep'] += 1
+        
+        # Generate CWE summary rows
+        for (cwe_id, cwe_name), counts in sorted(cwe_summary.items()):
+            tools_found = []
+            if counts['custom'] > 0:
+                tools_found.append(f"Custom ({counts['custom']})")
+            if counts['bandit'] > 0:
+                tools_found.append(f"Bandit ({counts['bandit']})")
+            if counts['semgrep'] > 0:
+                tools_found.append(f"Semgrep ({counts['semgrep']})")
+            
+            identified_by = ", ".join(tools_found)
+            total_occ = counts['custom'] + counts['bandit'] + counts['semgrep']
+            
+            html += f"""
+                <tr>
+                    <td><strong>{cwe_id}</strong></td>
+                    <td>{cwe_name}</td>
+                    <td>{identified_by}</td>
+                    <td>{total_occ}</td>
+                </tr>
+"""
+        
+        html += """
+            </tbody>
+        </table>
     </div>
 """
         
@@ -1439,6 +1705,7 @@ class App:
                 <tr>
                     <th>ID</th>
                     <th>Name</th>
+                    <th>CWE ID</th>
                     <th>Severity</th>
                     <th>Line</th>
                     <th>Priority</th>
@@ -1451,6 +1718,7 @@ class App:
                 <tr>
                     <td><strong>{vuln['id']}</strong></td>
                     <td>{vuln['name']}</td>
+                    <td><strong>{vuln.get('cwe_id', 'N/A')}</strong></td>
                     <td><span class="severity-{vuln['severity']}">{vuln['severity']}</span></td>
                     <td>{vuln['line']}</td>
                     <td>{vuln['priority']}</td>
@@ -1474,6 +1742,7 @@ class App:
                 <tr>
                     <th>ID</th>
                     <th>Name</th>
+                    <th>CWE ID</th>
                     <th>Severity</th>
                     <th>Line</th>
                     <th>Priority</th>
@@ -1486,6 +1755,7 @@ class App:
                 <tr>
                     <td><strong>{vuln['id']}</strong></td>
                     <td>{vuln['name']}</td>
+                    <td><strong>{vuln.get('cwe_id', 'N/A')}</strong></td>
                     <td><span class="severity-{vuln['severity']}">{vuln['severity']}</span></td>
                     <td>{vuln['line']}</td>
                     <td>{vuln['priority']}</td>

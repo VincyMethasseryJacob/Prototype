@@ -242,7 +242,7 @@ class MetricsCalculator:
         bandit_count = len([v for v in vulns_after_patch if v.get('detection_method') == 'bandit'])
         semgrep_count = len([v for v in vulns_after_patch if v.get('detection_method') == 'semgrep'])
 
-        fixed_total = max(0, len(detected_vulns) - len(vulns_after_patch))
+        # fixed_total is not used for raw occurrence count, will be overridden in workflow.py
         
         return {
             'patching_effectiveness': patching_metrics,

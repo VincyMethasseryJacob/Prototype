@@ -528,6 +528,47 @@ class VulnerabilityAnalysisWorkflow:
             'issues': all_semgrep_issues
         }
         
+        # Unique vulnerability count must be by CWE ID across all stages/tools
+        # Normalize CWE IDs to consistent format (3 digits with leading zeros, no descriptions)
+        unique_cwe_ids = set()
+        for v in all_found_vulns:
+            cwe_id = v.get('cwe_id')
+            if cwe_id is not None and cwe_id != '':
+                # Convert to string and extract just the numeric part
+                cwe_str = str(cwe_id)
+                # Remove any text after colon (e.g., "89: SQL Injection" -> "89")
+                if ':' in cwe_str:
+                    cwe_str = cwe_str.split(':')[0].strip()
+                # Remove 'CWE-' prefix if present
+                if cwe_str.upper().startswith('CWE-'):
+                    cwe_str = cwe_str[4:]
+                # Extract only digits
+                cwe_str = ''.join(filter(str.isdigit, cwe_str))
+                # Pad to 3 digits
+                if cwe_str:
+                    cwe_str = cwe_str.zfill(3)
+                    unique_cwe_ids.add(cwe_str)
+        
+        # Calculate remaining unique CWE IDs with same normalization
+        remaining_cwe_ids = set()
+        for v in total_remaining_vulns:
+            cwe_id = v.get('cwe_id')
+            if cwe_id is not None and cwe_id != '':
+                # Apply same normalization
+                cwe_str = str(cwe_id)
+                if ':' in cwe_str:
+                    cwe_str = cwe_str.split(':')[0].strip()
+                if cwe_str.upper().startswith('CWE-'):
+                    cwe_str = cwe_str[4:]
+                cwe_str = ''.join(filter(str.isdigit, cwe_str))
+                if cwe_str:
+                    cwe_str = cwe_str.zfill(3)
+                    remaining_cwe_ids.add(cwe_str)
+        
+        # Total fixed = raw occurrences found - raw occurrences remaining (no filters)
+        total_remaining_occurrences = len(total_remaining_vulns)
+        total_fixed_occurrences = len(all_found_vulns) - total_remaining_occurrences
+        
         metrics = self._step_calculate_metrics(
             all_findings_deduped,  # Use all findings (initial + iterations) deduplicated by line only
             total_remaining_vulns,
@@ -536,8 +577,25 @@ class VulnerabilityAnalysisWorkflow:
             results.get('initial_code_deduped_count', 0),
             results.get('all_iterations_deduped_count', 0)
         )
+        
+        # Unique vulnerability metrics (by CWE ID only)
+        metrics['total_detected'] = len(unique_cwe_ids)
+        metrics['unique_cwe_ids'] = sorted(list(unique_cwe_ids))
+        metrics['total_remaining'] = len(remaining_cwe_ids)
+        metrics['remaining_cwe_ids'] = sorted(list(remaining_cwe_ids))
+        
+        # Override total_fixed with raw occurrence count (not deduplicated)
+        metrics['total_fixed'] = total_fixed_occurrences
+        
+        # Override severity breakdowns to use all_found_vulns (raw occurrences) instead of deduplicated
+        severity_before_all = self.metrics_calc.generate_severity_breakdown(all_found_vulns)
+        severity_after_all = self.metrics_calc.generate_severity_breakdown(total_remaining_vulns)
+        metrics['severity_before_patch'] = severity_before_all
+        metrics['severity_after_patch'] = severity_after_all
+        
         # Add raw occurrence counts (no deduplication) for UI
         metrics['total_detected_all_occurrences'] = len(all_found_vulns)
+        metrics['total_remaining_all_occurrences'] = total_remaining_occurrences
         metrics['iterations_total_all_occurrences'] = len(iteration_findings)
         # Per-tool raw totals (all occurrences, no dedup) - sum of initial + iterations for each tool
         metrics['custom_detector_total_all_occurrences'] = initial_custom_count + iteration_custom_count
@@ -549,7 +607,12 @@ class VulnerabilityAnalysisWorkflow:
         print(f"📊 DEBUG Metrics After Calculate:")
         print(f"   initial_code_deduped_count in metrics: {metrics.get('initial_code_deduped_count')}")
         print(f"   all_iterations_deduped_count in metrics: {metrics.get('all_iterations_deduped_count')}")
-        print(f"   total_detected in metrics: {metrics.get('total_detected')}")
+        print(f"   total_detected (unique CWE count): {metrics.get('total_detected')}")
+        print(f"   unique_cwe_ids: {metrics.get('unique_cwe_ids')}")
+        print(f"   total_remaining (unique remaining CWEs): {metrics.get('total_remaining')}")
+        print(f"   remaining_cwe_ids: {metrics.get('remaining_cwe_ids')}")
+        print(f"   total_fixed (unique CWEs fixed): {metrics.get('total_fixed')}")
+        print(f"   total_detected_all_occurrences: {metrics.get('total_detected_all_occurrences')}")
         # Tool-wise detected counts across all iterations (deduped)
         bandit_detected = len([v for v in unique_found_vulns if v.get('detection_method') == 'bandit'])
         semgrep_detected = len([v for v in unique_found_vulns if v.get('detection_method') == 'semgrep'])
@@ -565,20 +628,15 @@ class VulnerabilityAnalysisWorkflow:
         )
         results['final_reports'] = final_reports
         
-        # Determine overall status and set UI info flag
-        if all_iterations:
-            if not all_iterations[-1]['unpatched_vulns']:
-                results['status'] = 'fully_patched'
-                results['show_patch_info_message'] = False
-                print("\n✅ Workflow completed successfully - all vulnerabilities patched!")
-            else:
-                results['status'] = 'partially_patched'
-                results['show_patch_info_message'] = True
-                print(f"\n⚠️  Workflow completed - {len(all_iterations[-1]['unpatched_vulns'])} vulnerabilities remain")
-        else:
+        # Determine overall status based on all tools (custom + Bandit + Semgrep)
+        if len(total_remaining_vulns) == 0:
             results['status'] = 'fully_patched'
             results['show_patch_info_message'] = False
             print("\n✅ Workflow completed successfully - all vulnerabilities patched!")
+        else:
+            results['status'] = 'partially_patched'
+            results['show_patch_info_message'] = True
+            print(f"\n⚠️  Workflow completed - {len(total_remaining_vulns)} vulnerabilities remain")
         return results
     
     def _step_preprocessing(self, code: str) -> str:
@@ -673,7 +731,7 @@ class VulnerabilityAnalysisWorkflow:
             vuln = {
                 'cwe_id': cwe_id,
                 'cwe_name': issue.get('test_name', 'Unknown'),
-                'severity': issue.get('severity', 'MEDIUM').lower(),
+                'severity': issue.get('severity', 'MEDIUM').upper(),
                 'confidence': issue.get('confidence', 'MEDIUM'),
                 'line': line_num,
                 'snippet': snippet,
@@ -710,7 +768,7 @@ class VulnerabilityAnalysisWorkflow:
             vuln = {
                 'cwe_id': cwe_id,
                 'cwe_name': self.detector._get_cwe_name(cwe_id) if cwe_id else 'Unknown',
-                'severity': issue.get('severity', 'MEDIUM').lower(),
+                'severity': issue.get('severity', 'MEDIUM').upper(),
                 'confidence': 'MEDIUM',
                 'line': line_num,
                 'snippet': snippet,

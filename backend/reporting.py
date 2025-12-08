@@ -268,22 +268,25 @@ class VulnerabilityReporter:
         
         <h2>Key Performance Indicators</h2>
         <p style="color: #7f8c8d; font-size: 14px; margin-bottom: 20px;">
-            <strong>Note:</strong> Metrics combine results from Custom Detector (initial), Bandit, and Semgrep (on patched code).
+            <strong>Note:</strong> Metrics combine results from Custom Detector, Bandit, and Semgrep.<br>
+            <strong>Fix Rate vs Effectiveness:</strong> Fix Rate shows the percentage of vulnerabilities fixed. 
+            Effectiveness Score adjusts this by penalizing if new vulnerabilities were introduced during patching 
+            (reduces by 10% per new vulnerability). When both rates are equal, no new issues were introduced.
         </p>
         <div class="metric-grid">
             <div class="metric-card success">
-                <h3>Total Detected</h3>
-                <div class="value">{metrics.get('total_detected', 0)}</div>
-                <p>Initial Vulnerabilities</p>
+                <h3>Total Vulnerabilities Detected</h3>
+                <div class="value">{metrics.get('total_detected_all_occurrences', 0)}</div>
+                <p>All Occurrences Found</p>
             </div>
             <div class="metric-card">
                 <h3>Total Remaining</h3>
-                <div class="value">{metrics.get('total_after_patch', 0)}</div>
+                <div class="value">{metrics.get('total_remaining_all_occurrences', 0)}</div>
                 <p>All Tools Combined</p>
             </div>
             <div class="metric-card success">
                 <h3>Total Fixed</h3>
-                <div class="value">{pe.get('vulnerabilities_fixed', 0)}</div>
+                <div class="value">{metrics.get('total_fixed', 0)}</div>
                 <p>Issues Resolved</p>
             </div>
             <div class="metric-card info">
@@ -346,15 +349,24 @@ class VulnerabilityReporter:
                 labels: ['Total Detected', 'Remaining Unfixed'],
                 datasets: [{{
                     label: 'High Severity',
-                    data: [{severity_before.get('HIGH', 0)}, {severity_after.get('HIGH', 0)}],
+                    data: [
+                        {metrics.get('severity_before_patch', {}).get('HIGH', 0)},
+                        {metrics.get('severity_after_patch', {}).get('HIGH', 0)}
+                    ],
                     backgroundColor: '#e74c3c'
                 }}, {{
                     label: 'Medium Severity',
-                    data: [{severity_before.get('MEDIUM', 0)}, {severity_after.get('MEDIUM', 0)}],
+                    data: [
+                        {metrics.get('severity_before_patch', {}).get('MEDIUM', 0)},
+                        {metrics.get('severity_after_patch', {}).get('MEDIUM', 0)}
+                    ],
                     backgroundColor: '#f39c12'
                 }}, {{
                     label: 'Low Severity',
-                    data: [{severity_before.get('LOW', 0)}, {severity_after.get('LOW', 0)}],
+                    data: [
+                        {metrics.get('severity_before_patch', {}).get('LOW', 0)},
+                        {metrics.get('severity_after_patch', {}).get('LOW', 0)}
+                    ],
                     backgroundColor: '#2ecc71'
                 }}]
             }},
@@ -402,8 +414,8 @@ class VulnerabilityReporter:
                 labels: ['Fixed', 'Remaining'],
                 datasets: [{{
                     data: [
-                        {pe.get('vulnerabilities_fixed', 0)},
-                        {pe.get('vulnerabilities_remaining', 0)}
+                        {metrics.get('total_fixed', 0)},
+                        {metrics.get('total_remaining_all_occurrences', 0)}
                     ],
                     backgroundColor: ['#27ae60', '#e74c3c']
                 }}]
@@ -426,6 +438,7 @@ class VulnerabilityReporter:
         
         return report_path
     
+
     def generate_html_summary(
         self,
         vulnerabilities: List[Dict],
@@ -435,11 +448,26 @@ class VulnerabilityReporter:
         patched_code: str = ""
     ) -> str:
         """
-        Generate an HTML summary report with original and patched code.
+        Generate an HTML summary report with custom executive summary and detected vulnerabilities table as per requirements.
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         html_path = os.path.join(self.output_dir, f"summary_report_{timestamp}.html")
-        
+
+        # Gather tool counts for initial and iteration (from metrics)
+        init_custom = metrics.get('initial_custom_count', 0)
+        init_bandit = metrics.get('initial_bandit_count', 0)
+        init_semgrep = metrics.get('initial_semgrep_count', 0)
+        iter_custom = metrics.get('custom_detector_total_all_occurrences', 0)
+        iter_bandit = metrics.get('bandit_total_all_occurrences', 0)
+        iter_semgrep = metrics.get('semgrep_total_all_occurrences', 0)
+        total_all = iter_custom + iter_bandit + iter_semgrep
+
+        # Gather all vulnerabilities from all tools, initial and iteration
+        all_vulns = metrics.get('all_found_vulns_occurrences', [])
+        # If not present, fallback to vulnerabilities param
+        if not all_vulns:
+            all_vulns = vulnerabilities
+
         html_content = f"""
 <!DOCTYPE html>
 <html>
@@ -458,6 +486,10 @@ class VulnerabilityReporter:
         .high {{ color: #e74c3c; font-weight: bold; }}
         .medium {{ color: #f39c12; font-weight: bold; }}
         .low {{ color: #27ae60; font-weight: bold; }}
+        .summary-flex {{ display: flex; justify-content: space-between; gap: 40px; margin-bottom: 20px; }}
+        .summary-col {{ flex: 1; background: #f3f6fa; border-radius: 10px; padding: 20px; }}
+        .summary-col h3 {{ margin-top: 0; color: #2c3e50; font-size: 18px; }}
+        .summary-total {{ text-align: center; margin: 20px 0; font-size: 20px; font-weight: bold; color: #764ba2; }}
         .metric {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; margin: 15px 0; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
         .metric p {{ margin: 8px 0; font-size: 16px; }}
         .metric strong {{ font-weight: 600; }}
@@ -482,19 +514,26 @@ class VulnerabilityReporter:
     <div class="container">
         <h1>🔒 LLM Code Vulnerability Analysis Report</h1>
         <p class="timestamp">Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
-        
+
         <h2>Executive Summary</h2>
-        <div class="metric">
-            <p><strong>Initial Vulnerabilities (Custom Detector):</strong> {len(vulnerabilities)}</p>
-            <p><strong>Vulnerabilities Fixed:</strong> {patch_info.get('changes_count', 0)} <span class="success-badge">✓</span></p>
-            <p><strong>Remaining Issues (All Tools):</strong> {metrics.get('total_after_patch', 0)} {('<span class="warning-badge">!</span>' if metrics.get('total_after_patch', 0) > 0 else '')}</p>
-            <p style="font-size: 12px; color: #7f8c8d; margin-top: 10px;">
-                ℹ️ <em>Remaining count includes Custom Detector ({patch_info.get('unpatched_count', 0)}), Bandit ({metrics.get('bandit_remaining', 0)}), and Semgrep ({metrics.get('semgrep_remaining', 0)}) findings on patched code.</em>
-            </p>
-            <p><strong>Overall Fix Rate:</strong> {metrics.get('patching_effectiveness', {}).get('fix_rate', 0):.2%}</p>
-            <p><strong>Effectiveness Score:</strong> {metrics.get('patching_effectiveness', {}).get('effectiveness_score', 0):.2%}</p>
+        <div class="summary-flex">
+            <div class="summary-col">
+                <h3>Iteration Process</h3>
+                <p>Total vulnerabilities custom detector found: <strong>{iter_custom}</strong></p>
+                <p>Total Bandit found: <strong>{iter_bandit}</strong></p>
+                <p>Total Semgrep found: <strong>{iter_semgrep}</strong></p>
+            </div>
+            <div class="summary-col">
+                <h3>Initial Process</h3>
+                <p>Total vulnerabilities custom detector found: <strong>{init_custom}</strong></p>
+                <p>Total Bandit found: <strong>{init_bandit}</strong></p>
+                <p>Total Semgrep found: <strong>{init_semgrep}</strong></p>
+            </div>
         </div>
-        
+        <div class="summary-total">
+            Total found in all processes by all tools: <span style="color:#e67e22">{total_all}</span>
+        </div>
+
         <h2>Detected Vulnerabilities</h2>
         <table>
             <tr>
@@ -503,15 +542,16 @@ class VulnerabilityReporter:
                 <th>Severity</th>
                 <th>Line</th>
                 <th>Description</th>
+                <th>Detection Method</th>
             </tr>
-            {''.join(self._generate_html_vuln_rows(vulnerabilities))}
+            {''.join(self._generate_html_vuln_rows(all_vulns))}
         </table>
-        
+
         <h2>Severity Distribution</h2>
         <div class="severity-dist">
             {self._generate_severity_cards(metrics.get('severity_before_patch', {}))}
         </div>
-        
+
         <h2>Code Analysis</h2>
         <div class="code-section">
             <div class="code-container">
@@ -525,11 +565,11 @@ class VulnerabilityReporter:
                 </div>
             </div>
         </div>
-        
+
         <h2>Patching Details</h2>
-        <p><strong>Changes Applied:</strong> {patch_info.get('changes_count', 0)}</p>
-        <p><strong>Patch Success Rate:</strong> {patch_info.get('changes_count', 0) / max(len(vulnerabilities), 1):.2%}</p>
-        
+        <p><strong>Patches Done:</strong> {patch_info.get('changes_count', 0)}</p>
+        <p><strong>Patch Success Rate:</strong> {patch_info.get('changes_count', 0) / max(total_all, 1):.2%}</p>
+
         <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #ecf0f1; color: #7f8c8d; font-size: 12px;">
             <p>Generated by LLM-CVAM Framework - Code Vulnerability Analysis and Mitigation System</p>
         </div>
@@ -537,10 +577,8 @@ class VulnerabilityReporter:
 </body>
 </html>
 """
-        
         with open(html_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
-        
         return html_path
     
     def _escape_html(self, text: str) -> str:

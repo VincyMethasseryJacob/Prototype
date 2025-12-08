@@ -248,9 +248,19 @@ class StaticAnalyzer:
                 }
 
             findings = []
+            # Map Semgrep severity to Bandit-style
+            semgrep_severity_map = {
+                'ERROR': 'HIGH',
+                'WARNING': 'MEDIUM',
+                'INFO': 'LOW',
+                'MEDIUM': 'MEDIUM',
+                'HIGH': 'HIGH',
+                'LOW': 'LOW'
+            }
             for r in data.get('results', []):
                 extra = r.get('extra', {})
-                severity = (extra.get('severity') or 'MEDIUM').upper()
+                raw_severity = (extra.get('severity') or 'MEDIUM').upper()
+                severity = semgrep_severity_map.get(raw_severity, 'MEDIUM')
                 # semgrep often includes metadata.cwe: ["CWE-089"]
                 meta = extra.get('metadata', {})
                 cwes = meta.get('cwe') or []
