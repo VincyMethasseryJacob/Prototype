@@ -351,23 +351,175 @@ class StaticAnalyzer:
         
         # Extract CWE IDs from both
         bandit_cwes = set(issue.get('cwe_id') for issue in bandit_issues if issue.get('cwe_id'))
+        secondary_cwes = set(issue.get('cwe_id') for issue in secondary_issues if issue.get('cwe_id'))
         
-        # Map Semgrep issues to approximate CWE categories (simplified)
-        secondary_lines = set(issue.get('line_number') for issue in secondary_issues)
-        bandit_lines = set(issue.get('line_number') for issue in bandit_issues)
+        # Extract line numbers - handle different formats
+        # Bandit uses 'line_number' directly
+        bandit_lines = set(issue.get('line_number') for issue in bandit_issues if issue.get('line_number'))
         
+        # Semgrep uses 'start'/'end' dictionaries - extract 'line' from 'start'
+        secondary_lines = set()
+        for issue in secondary_issues:
+            line = None
+            if 'start' in issue and isinstance(issue['start'], dict):
+                line = issue['start'].get('line')
+            elif 'line_number' in issue:
+                line = issue['line_number']
+            if line:
+                secondary_lines.add(line)
+        
+        # Calculate overlaps by line and by CWE
         overlapping_lines = bandit_lines.intersection(secondary_lines)
+        overlapping_cwes = bandit_cwes.intersection(secondary_cwes)
         
         return {
             'bandit_total': len(bandit_issues),
             'secondary_total': len(secondary_issues),
             'bandit_unique_cwes': len(bandit_cwes),
+            'secondary_unique_cwes': len(secondary_cwes),
             'overlapping_lines': len(overlapping_lines),
+            'overlapping_cwes': len(overlapping_cwes),
             'bandit_only_lines': len(bandit_lines - secondary_lines),
             'secondary_only_lines': len(secondary_lines - bandit_lines),
+            'bandit_only_cwes': len(bandit_cwes - secondary_cwes),
+            'secondary_only_cwes': len(secondary_cwes - bandit_cwes),
             'bandit_severity': bandit_results.get('summary', {}).get('severity_breakdown', {}),
             'secondary_types': secondary_results.get('summary', {}).get('type_breakdown', {})
         }
+    
+    def compare_three_tools(self, custom_vulns: List[Dict], bandit_results: Dict, secondary_results: Dict) -> Dict:
+        """
+        Compare results from all three tools: Custom Detector, Bandit, and Semgrep.
+        
+        Args:
+            custom_vulns: List of vulnerabilities from custom detector
+            bandit_results: Results from Bandit analysis
+            secondary_results: Results from Semgrep analysis
+        
+        Returns:
+            Dict with 3-way comparison statistics including overlaps between all tools
+        """
+        bandit_issues = bandit_results.get('issues', [])
+        secondary_issues = secondary_results.get('issues', [])
+        
+        # Extract CWE IDs from all three tools
+        custom_cwes = set(v.get('cwe_id') for v in custom_vulns if v.get('cwe_id'))
+        bandit_cwes = set(issue.get('cwe_id') for issue in bandit_issues if issue.get('cwe_id'))
+        secondary_cwes = set(issue.get('cwe_id') for issue in secondary_issues if issue.get('cwe_id'))
+        
+        # Extract line numbers from all three tools
+        # Custom detector uses 'line_number' or 'line'
+        custom_lines = set()
+        for v in custom_vulns:
+            line = v.get('line_number') or v.get('line')
+            if line:
+                custom_lines.add(line)
+        
+        # Bandit uses 'line_number'
+        bandit_lines = set(issue.get('line_number') for issue in bandit_issues if issue.get('line_number'))
+        
+        # Semgrep uses 'start'/'end' dictionaries
+        secondary_lines = set()
+        for issue in secondary_issues:
+            line = None
+            if 'start' in issue and isinstance(issue['start'], dict):
+                line = issue['start'].get('line')
+            elif 'line_number' in issue:
+                line = issue['line_number']
+            if line:
+                secondary_lines.add(line)
+        
+        # Calculate 2-way overlaps (by line)
+        custom_bandit_lines = custom_lines.intersection(bandit_lines)
+        custom_secondary_lines = custom_lines.intersection(secondary_lines)
+        bandit_secondary_lines = bandit_lines.intersection(secondary_lines)
+        
+        # Calculate 3-way overlap (by line) - found by all three tools
+        three_way_lines = custom_lines.intersection(bandit_lines).intersection(secondary_lines)
+        
+        # Calculate 2-way overlaps (by CWE)
+        custom_bandit_cwes = custom_cwes.intersection(bandit_cwes)
+        custom_secondary_cwes = custom_cwes.intersection(secondary_cwes)
+        bandit_secondary_cwes = bandit_cwes.intersection(secondary_cwes)
+        
+        # Calculate 3-way overlap (by CWE) - found by all three tools
+        three_way_cwes = custom_cwes.intersection(bandit_cwes).intersection(secondary_cwes)
+        
+        # Calculate unique detections (found by only one tool)
+        all_lines = custom_lines.union(bandit_lines).union(secondary_lines)
+        custom_only_lines = custom_lines - bandit_lines - secondary_lines
+        bandit_only_lines = bandit_lines - custom_lines - secondary_lines
+        secondary_only_lines = secondary_lines - custom_lines - bandit_lines
+        
+        all_cwes = custom_cwes.union(bandit_cwes).union(secondary_cwes)
+        custom_only_cwes = custom_cwes - bandit_cwes - secondary_cwes
+        bandit_only_cwes = bandit_cwes - custom_cwes - secondary_cwes
+        secondary_only_cwes = secondary_cwes - custom_cwes - bandit_cwes
+        
+        # Calculate overlap rates
+        total_unique_lines = len(all_lines)
+        total_unique_cwes = len(all_cwes)
+        
+        three_way_line_rate = len(three_way_lines) / total_unique_lines if total_unique_lines > 0 else 0.0
+        three_way_cwe_rate = len(three_way_cwes) / total_unique_cwes if total_unique_cwes > 0 else 0.0
+        
+        return {
+            # Tool totals
+            'custom_total': len(custom_vulns),
+            'bandit_total': len(bandit_issues),
+            'secondary_total': len(secondary_issues),
+            
+            # Unique CWEs per tool
+            'custom_unique_cwes': len(custom_cwes),
+            'bandit_unique_cwes': len(bandit_cwes),
+            'secondary_unique_cwes': len(secondary_cwes),
+            
+            # 2-way overlaps (lines)
+            'custom_bandit_overlap_lines': len(custom_bandit_lines),
+            'custom_secondary_overlap_lines': len(custom_secondary_lines),
+            'bandit_secondary_overlap_lines': len(bandit_secondary_lines),
+            
+            # 2-way overlaps (CWEs)
+            'custom_bandit_overlap_cwes': len(custom_bandit_cwes),
+            'custom_secondary_overlap_cwes': len(custom_secondary_cwes),
+            'bandit_secondary_overlap_cwes': len(bandit_secondary_cwes),
+            
+            # 3-way overlap (all tools agree)
+            'three_way_overlap_lines': len(three_way_lines),
+            'three_way_overlap_cwes': len(three_way_cwes),
+            'three_way_line_rate': round(three_way_line_rate, 3),
+            'three_way_cwe_rate': round(three_way_cwe_rate, 3),
+            
+            # Unique to each tool (lines)
+            'custom_only_lines': len(custom_only_lines),
+            'bandit_only_lines': len(bandit_only_lines),
+            'secondary_only_lines': len(secondary_only_lines),
+            
+            # Unique to each tool (CWEs)
+            'custom_only_cwes': len(custom_only_cwes),
+            'bandit_only_cwes': len(bandit_only_cwes),
+            'secondary_only_cwes': len(secondary_only_cwes),
+            
+            # Totals
+            'total_unique_lines': total_unique_lines,
+            'total_unique_cwes': total_unique_cwes,
+            
+            # Tool summaries
+            'custom_severity': self._calculate_severity_breakdown(custom_vulns),
+            'bandit_severity': bandit_results.get('summary', {}).get('severity_breakdown', {}),
+            'secondary_severity': secondary_results.get('summary', {}).get('severity_breakdown', {})
+        }
+    
+    def _calculate_severity_breakdown(self, vulns: List[Dict]) -> Dict[str, int]:
+        """Calculate severity breakdown for custom detector results."""
+        breakdown = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0, 'UNDEFINED': 0}
+        for v in vulns:
+            severity = v.get('severity', 'UNDEFINED')
+            if severity in breakdown:
+                breakdown[severity] += 1
+            else:
+                breakdown['UNDEFINED'] += 1
+        return breakdown
 
 
 # Backwards compatibility functions

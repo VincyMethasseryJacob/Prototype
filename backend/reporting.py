@@ -231,40 +231,68 @@ class VulnerabilityReporter:
         
         report_path = os.path.join(self.output_dir, f"{filename_base}.html")
         
-        # Extract metrics data
+        # Extract metrics data with safe defaults
         pe = metrics.get('patching_effectiveness', {})
         tc = metrics.get('tool_comparison', {})
         severity_before = metrics.get('severity_before_patch', {})
         severity_after = metrics.get('severity_after_patch', {})
         
-        # Generate HTML with charts
-        html_content = f"""
-<!DOCTYPE html>
+        # Debug print to check data
+        print(f"\n🔍 DEBUG - Metrics Report Data:")
+        print(f"   severity_before_patch: {severity_before}")
+        print(f"   severity_after_patch: {severity_after}")
+        print(f"   custom_detector_total: {metrics.get('custom_detector_total_all_occurrences', 0)}")
+        print(f"   bandit_total: {metrics.get('bandit_total_all_occurrences', 0)}")
+        print(f"   semgrep_total: {metrics.get('semgrep_total_all_occurrences', 0)}")
+        print(f"   total_fixed: {metrics.get('total_fixed', 0)}")
+        print(f"   total_remaining: {metrics.get('total_remaining_all_occurrences', 0)}")
+        
+        # Extract severity counts with defaults
+        sev_before_high = int(severity_before.get('HIGH', 0) or 0)
+        sev_before_med = int(severity_before.get('MEDIUM', 0) or 0)
+        sev_before_low = int(severity_before.get('LOW', 0) or 0)
+        sev_after_high = int(severity_after.get('HIGH', 0) or 0)
+        sev_after_med = int(severity_after.get('MEDIUM', 0) or 0)
+        sev_after_low = int(severity_after.get('LOW', 0) or 0)
+        
+        custom_total = int(metrics.get('custom_detector_total_all_occurrences', 0) or 0)
+        bandit_total = int(metrics.get('bandit_total_all_occurrences', 0) or 0)
+        semgrep_total = int(metrics.get('semgrep_total_all_occurrences', 0) or 0)
+        total_fixed = int(metrics.get('total_fixed', 0) or 0)
+        total_remaining = int(metrics.get('total_remaining_all_occurrences', 0) or 0)
+        
+        timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        total_detected = int(metrics.get('total_detected_all_occurrences', 0) or 0)
+        fix_rate = pe.get('fix_rate', 0) or 0
+        effectiveness_score = pe.get('effectiveness_score', 0) or 0
+        
+        # Build HTML content
+        html_content = """<!DOCTYPE html>
 <html>
 <head>
     <title>Metrics Report</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
-        .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }}
-        h2 {{ color: #34495e; margin-top: 30px; }}
-        .chart-container {{ margin: 30px 0; padding: 20px; background: #fafafa; border-radius: 8px; }}
-        .metric-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }}
-        .metric-card {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
-        .metric-card h3 {{ margin: 0 0 10px 0; font-size: 14px; opacity: 0.9; }}
-        .metric-card .value {{ font-size: 36px; font-weight: bold; margin: 10px 0; }}
-        .metric-card.success {{ background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }}
-        .metric-card.warning {{ background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }}
-        .metric-card.info {{ background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }}
-        canvas {{ max-height: 400px; }}
-        .timestamp {{ color: #7f8c8d; font-size: 14px; margin-top: 10px; }}
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #34495e; margin-top: 30px; }
+        .chart-container { margin: 30px 0; padding: 20px; background: #fafafa; border-radius: 8px; position: relative; height: 400px; }
+        .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }
+        .metric-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .metric-card h3 { margin: 0 0 10px 0; font-size: 14px; opacity: 0.9; }
+        .metric-card .value { font-size: 36px; font-weight: bold; margin: 10px 0; }
+        .metric-card.success { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
+        .metric-card.warning { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .metric-card.info { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        canvas { max-height: 350px !important; }
+        .timestamp { color: #7f8c8d; font-size: 14px; margin-top: 10px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📊 Vulnerability Analysis Metrics</h1>
-        <p class="timestamp">Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+        <p class="timestamp">Generated: """ + timestamp_str + """</p>
         
         <h2>Key Performance Indicators</h2>
         <p style="color: #7f8c8d; font-size: 14px; margin-bottom: 20px;">
@@ -276,22 +304,22 @@ class VulnerabilityReporter:
         <div class="metric-grid">
             <div class="metric-card success">
                 <h3>Total Vulnerabilities Detected</h3>
-                <div class="value">{metrics.get('total_detected_all_occurrences', 0)}</div>
+                <div class="value">""" + str(total_detected) + """</div>
                 <p>All Occurrences Found</p>
             </div>
             <div class="metric-card">
                 <h3>Total Remaining</h3>
-                <div class="value">{metrics.get('total_remaining_all_occurrences', 0)}</div>
+                <div class="value">""" + str(total_remaining) + """</div>
                 <p>All Tools Combined</p>
             </div>
             <div class="metric-card success">
                 <h3>Total Fixed</h3>
-                <div class="value">{metrics.get('total_fixed', 0)}</div>
+                <div class="value">""" + str(total_fixed) + """</div>
                 <p>Issues Resolved</p>
             </div>
             <div class="metric-card info">
                 <h3>Fix Rate</h3>
-                <div class="value">{pe.get('fix_rate', 0):.1%}</div>
+                <div class="value">""" + f"{fix_rate:.1%}" + """</div>
                 <p>Overall Effectiveness</p>
             </div>
         </div>
@@ -300,22 +328,22 @@ class VulnerabilityReporter:
         <div class="metric-grid">
             <div class="metric-card">
                 <h3>Custom Detector</h3>
-                <div class="value">{metrics.get('custom_detector_total_all_occurrences', 0)}</div>
+                <div class="value">""" + str(custom_total) + """</div>
                 <p>Total Custom Detector Found</p>
             </div>
             <div class="metric-card">
                 <h3>Bandit</h3>
-                <div class="value">{metrics.get('bandit_total_all_occurrences', 0)}</div>
+                <div class="value">""" + str(bandit_total) + """</div>
                 <p>Total Bandit Found</p>
             </div>
             <div class="metric-card">
                 <h3>Semgrep</h3>
-                <div class="value">{metrics.get('semgrep_total_all_occurrences', 0)}</div>
+                <div class="value">""" + str(semgrep_total) + """</div>
                 <p>Total Semgrep Found</p>
             </div>
             <div class="metric-card info">
                 <h3>Effectiveness</h3>
-                <div class="value">{pe.get('effectiveness_score', 0):.1%}</div>
+                <div class="value">""" + f"{effectiveness_score:.1%}" + """</div>
                 <p>Quality Score</p>
             </div>
         </div>
@@ -341,93 +369,87 @@ class VulnerabilityReporter:
     </div>
     
     <script>
+    </div>
+    
+    <script>
         // Severity Distribution Chart
         const severityCtx = document.getElementById('severityChart').getContext('2d');
-        new Chart(severityCtx, {{
+        new Chart(severityCtx, {
             type: 'bar',
-            data: {{
+            data: {
                 labels: ['Total Detected', 'Remaining Unfixed'],
-                datasets: [{{
-                    label: 'High Severity',
-                    data: [
-                        {metrics.get('severity_before_patch', {}).get('HIGH', 0)},
-                        {metrics.get('severity_after_patch', {}).get('HIGH', 0)}
-                    ],
-                    backgroundColor: '#e74c3c'
-                }}, {{
-                    label: 'Medium Severity',
-                    data: [
-                        {metrics.get('severity_before_patch', {}).get('MEDIUM', 0)},
-                        {metrics.get('severity_after_patch', {}).get('MEDIUM', 0)}
-                    ],
-                    backgroundColor: '#f39c12'
-                }}, {{
-                    label: 'Low Severity',
-                    data: [
-                        {metrics.get('severity_before_patch', {}).get('LOW', 0)},
-                        {metrics.get('severity_after_patch', {}).get('LOW', 0)}
-                    ],
-                    backgroundColor: '#2ecc71'
-                }}]
-            }},
-            options: {{
+                datasets: [
+                    {
+                        label: 'High Severity',
+                        data: [""" + str(sev_before_high) + """, """ + str(sev_after_high) + """],
+                        backgroundColor: '#e74c3c'
+                    },
+                    {
+                        label: 'Medium Severity',
+                        data: [""" + str(sev_before_med) + """, """ + str(sev_after_med) + """],
+                        backgroundColor: '#f39c12'
+                    },
+                    {
+                        label: 'Low Severity',
+                        data: [""" + str(sev_before_low) + """, """ + str(sev_after_low) + """],
+                        backgroundColor: '#2ecc71'
+                    }
+                ]
+            },
+            options: {
                 responsive: true,
-                plugins: {{
-                    title: {{ display: true, text: 'Vulnerability Severity: All Detected vs. Remaining Unfixed' }},
-                    legend: {{ position: 'top' }}
-                }},
-                scales: {{
-                    y: {{ beginAtZero: true, title: {{ display: true, text: 'Count' }} }}
-                }}
-            }}
-        }});
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Vulnerability Severity: All Detected vs. Remaining Unfixed' },
+                    legend: { position: 'top' }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Count' } }
+                }
+            }
+        });
         
         // Tool Comparison Chart
         const toolCtx = document.getElementById('toolChart').getContext('2d');
-        new Chart(toolCtx, {{
+        new Chart(toolCtx, {
             type: 'doughnut',
-            data: {{
+            data: {
                 labels: ['Custom Detector', 'Bandit', 'Semgrep'],
-                datasets: [{{
-                    data: [
-                        {metrics.get('custom_detector_total_all_occurrences', 0)},
-                        {metrics.get('bandit_total_all_occurrences', 0)},
-                        {metrics.get('semgrep_total_all_occurrences', 0)}
-                    ],
+                datasets: [{
+                    data: [""" + str(custom_total) + """, """ + str(bandit_total) + """, """ + str(semgrep_total) + """],
                     backgroundColor: ['#3498db', '#9b59b6', '#e67e22']
-                }}]
-            }},
-            options: {{
+                }]
+            },
+            options: {
                 responsive: true,
-                plugins: {{
-                    title: {{ display: true, text: 'Vulnerabilities Detected by Each Tool (All Phases)' }},
-                    legend: {{ position: 'right' }}
-                }}
-            }}
-        }});
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Vulnerabilities Detected by Each Tool (All Phases)' },
+                    legend: { position: 'right' }
+                }
+            }
+        });
         
         // Patching Effectiveness Chart
         const patchCtx = document.getElementById('patchingChart').getContext('2d');
-        new Chart(patchCtx, {{
+        new Chart(patchCtx, {
             type: 'pie',
-            data: {{
+            data: {
                 labels: ['Fixed', 'Remaining'],
-                datasets: [{{
-                    data: [
-                        {metrics.get('total_fixed', 0)},
-                        {metrics.get('total_remaining_all_occurrences', 0)}
-                    ],
+                datasets: [{
+                    data: [""" + str(total_fixed) + """, """ + str(total_remaining) + """],
                     backgroundColor: ['#27ae60', '#e74c3c']
-                }}]
-            }},
-            options: {{
+                }]
+            },
+            options: {
                 responsive: true,
-                plugins: {{
-                    title: {{ display: true, text: 'Vulnerabilities Fixed vs Remaining' }},
-                    legend: {{ position: 'bottom' }}
-                }}
-            }}
-        }});
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Vulnerabilities Fixed vs Remaining' },
+                    legend: { position: 'bottom' }
+                }
+            }
+        });
     </script>
 </body>
 </html>
@@ -457,10 +479,10 @@ class VulnerabilityReporter:
         init_custom = metrics.get('initial_custom_count', 0)
         init_bandit = metrics.get('initial_bandit_count', 0)
         init_semgrep = metrics.get('initial_semgrep_count', 0)
-        iter_custom = metrics.get('custom_detector_total_all_occurrences', 0)
-        iter_bandit = metrics.get('bandit_total_all_occurrences', 0)
-        iter_semgrep = metrics.get('semgrep_total_all_occurrences', 0)
-        total_all = iter_custom + iter_bandit + iter_semgrep
+        iter_custom = metrics.get('iteration_custom_count', 0)
+        iter_bandit = metrics.get('iteration_bandit_count', 0)
+        iter_semgrep = metrics.get('iteration_semgrep_count', 0)
+        total_all = init_custom + init_bandit + init_semgrep + iter_custom + iter_bandit + iter_semgrep
 
         # Gather all vulnerabilities from all tools, initial and iteration
         all_vulns = metrics.get('all_found_vulns_occurrences', [])
@@ -597,13 +619,16 @@ class VulnerabilityReporter:
         rows = []
         for vuln in vulnerabilities:
             severity_class = vuln.get('severity', 'LOW').lower()
+            line_val = vuln.get('line_number') if vuln.get('line_number') is not None else vuln.get('line', 'N/A')
+            detection = vuln.get('detection_method', vuln.get('source', 'N/A'))
             row = f"""
         <tr>
             <td>{vuln.get('cwe_id', 'N/A')}</td>
             <td>{vuln.get('cwe_name', 'N/A')}</td>
             <td class="{severity_class}">{vuln.get('severity', 'N/A')}</td>
-            <td>{vuln.get('line_number', 'N/A')}</td>
+            <td>{line_val}</td>
             <td>{vuln.get('description', 'N/A')}</td>
+            <td>{detection}</td>
         </tr>
 """
             rows.append(row)
@@ -634,6 +659,424 @@ class VulnerabilityReporter:
             ''')
         
         return ''.join(cards)
+    
+    def export_3way_overlap_evolution_report(self, results: Dict, output_dir: str = "test_reports") -> str:
+        """
+        Generate comprehensive HTML report showing 3-way tool agreement evolution across phases.
+        
+        Args:
+            results: Complete workflow results with all_3way_comparisons
+            output_dir: Directory to save the report
+            
+        Returns:
+            Path to generated report file
+        """
+        import datetime
+        
+        os.makedirs(output_dir, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(output_dir, f"3way_overlap_evolution_{timestamp}.html")
+        
+        # Extract 3-way comparison data
+        all_comparisons = results.get('all_3way_comparisons', {})
+        initial = all_comparisons.get('initial_code', {})
+        iterations = all_comparisons.get('iterations', [])
+        final = all_comparisons.get('final_code', {})
+        
+        # Helper function to extract data safely
+        def get_comparison_data(comparison):
+            # Handle both list and integer values (some fields return len(), others return lists)
+            def safe_len(value):
+                if isinstance(value, (list, set)):
+                    return len(value)
+                elif isinstance(value, int):
+                    return value
+                else:
+                    return 0
+            
+            return {
+                'custom_only': safe_len(comparison.get('custom_only_cwes', 0)),
+                'bandit_only': safe_len(comparison.get('bandit_only_cwes', 0)),
+                'semgrep_only': safe_len(comparison.get('secondary_only_cwes', 0)),
+                'custom_bandit': safe_len(comparison.get('custom_bandit_overlap_cwes', 0)),
+                'custom_semgrep': safe_len(comparison.get('custom_secondary_overlap_cwes', 0)),
+                'bandit_semgrep': safe_len(comparison.get('bandit_secondary_overlap_cwes', 0)),
+                'three_way': safe_len(comparison.get('three_way_overlap_cwes', 0)),
+                'custom_total': comparison.get('custom_total', 0),
+                'bandit_total': comparison.get('bandit_total', 0),
+                'semgrep_total': comparison.get('secondary_total', 0)
+            }
+        
+        # Build phase data
+        phases = []
+        
+        # Initial phase
+        if initial:
+            phases.append({
+                'name': 'Initial Code',
+                'label': 'Initial',
+                'data': get_comparison_data(initial)
+            })
+        
+        # Iteration phases
+        for i, iter_comp in enumerate(iterations, 1):
+            if iter_comp:
+                phases.append({
+                    'name': f'After Iteration {i}',
+                    'label': f'Iter {i}',
+                    'data': get_comparison_data(iter_comp)
+                })
+        
+        # Final phase
+        if final:
+            phases.append({
+                'name': 'Final Code',
+                'label': 'Final',
+                'data': get_comparison_data(final)
+            })
+        
+        # Prepare chart data
+        phase_labels = [p['label'] for p in phases]
+        three_way_data = [p['data']['three_way'] for p in phases]
+        custom_bandit_data = [p['data']['custom_bandit'] for p in phases]
+        custom_semgrep_data = [p['data']['custom_semgrep'] for p in phases]
+        bandit_semgrep_data = [p['data']['bandit_semgrep'] for p in phases]
+        
+        custom_total_data = [p['data']['custom_total'] for p in phases]
+        bandit_total_data = [p['data']['bandit_total'] for p in phases]
+        semgrep_total_data = [p['data']['semgrep_total'] for p in phases]
+        
+        # Generate HTML
+        html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3-Way Tool Overlap Evolution Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 30px 0;
+        }
+        .phase-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .phase-table th, .phase-table td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: center;
+        }
+        .phase-table th {
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+        }
+        .phase-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .highlight-3way {
+            background-color: #e8f8f5;
+            font-weight: bold;
+        }
+        .legend {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #ecf0f1;
+            border-radius: 5px;
+        }
+        .legend-item {
+            display: inline-block;
+            margin-right: 20px;
+            margin-bottom: 10px;
+        }
+        .legend-color {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            margin-right: 5px;
+            vertical-align: middle;
+        }
+        .summary-box {
+            background-color: #e8f8f5;
+            border-left: 4px solid #1abc9c;
+            padding: 15px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 3-Way Tool Overlap Evolution Report</h1>
+        <p><strong>Generated:</strong> """ + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + """</p>
+        
+        <div class="summary-box">
+            <h3>Report Purpose</h3>
+            <p>This report tracks how vulnerability detection agreement between the three tools (Custom Detector, Bandit, Semgrep) 
+            evolves across different phases of analysis. As code is patched, line numbers and vulnerability counts change, 
+            which affects tool agreement.</p>
+        </div>
+        
+        <h2>Evolution of Tool Agreement</h2>
+        <div class="chart-container">
+            <canvas id="overlapEvolutionChart"></canvas>
+        </div>
+        
+        <h2>Total Vulnerabilities Detected Per Phase</h2>
+        <div class="chart-container">
+            <canvas id="totalVulnsChart"></canvas>
+        </div>
+        
+        <h2>Detailed Phase-by-Phase Breakdown</h2>
+        <table class="phase-table">
+            <thead>
+                <tr>
+                    <th>Phase</th>
+                    <th>Custom Total</th>
+                    <th>Bandit Total</th>
+                    <th>Semgrep Total</th>
+                    <th class="highlight-3way">3-Way Overlap</th>
+                    <th>Custom-Bandit</th>
+                    <th>Custom-Semgrep</th>
+                    <th>Bandit-Semgrep</th>
+                </tr>
+            </thead>
+            <tbody>"""
+        
+        for phase in phases:
+            data = phase['data']
+            html_content += f"""
+                <tr>
+                    <td><strong>{phase['name']}</strong></td>
+                    <td>{data['custom_total']}</td>
+                    <td>{data['bandit_total']}</td>
+                    <td>{data['semgrep_total']}</td>
+                    <td class="highlight-3way">{data['three_way']}</td>
+                    <td>{data['custom_bandit']}</td>
+                    <td>{data['custom_semgrep']}</td>
+                    <td>{data['bandit_semgrep']}</td>
+                </tr>"""
+        
+        html_content += """
+            </tbody>
+        </table>
+        
+        <div class="legend">
+            <h3>Legend</h3>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #1abc9c;"></span>
+                <strong>3-Way Overlap:</strong> CWEs detected by all three tools
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #3498db;"></span>
+                <strong>Custom-Bandit:</strong> CWEs detected by Custom and Bandit only
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #9b59b6;"></span>
+                <strong>Custom-Semgrep:</strong> CWEs detected by Custom and Semgrep only
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #e74c3c;"></span>
+                <strong>Bandit-Semgrep:</strong> CWEs detected by Bandit and Semgrep only
+            </div>
+        </div>
+        
+        <h2>Key Insights</h2>
+        <ul>"""
+        
+        # Generate insights
+        if len(phases) >= 2:
+            initial_3way = phases[0]['data']['three_way']
+            final_3way = phases[-1]['data']['three_way']
+            change = final_3way - initial_3way
+            
+            html_content += f"""
+            <li><strong>3-Way Agreement Change:</strong> From {initial_3way} CWEs (initial) to {final_3way} CWEs (final) - 
+            {'decreased' if change < 0 else 'increased' if change > 0 else 'unchanged'} by {abs(change)} CWEs</li>"""
+            
+            initial_total_custom = phases[0]['data']['custom_total']
+            final_total_custom = phases[-1]['data']['custom_total']
+            html_content += f"""
+            <li><strong>Custom Detector:</strong> {initial_total_custom} vulnerabilities initially → {final_total_custom} finally</li>"""
+            
+            initial_total_bandit = phases[0]['data']['bandit_total']
+            final_total_bandit = phases[-1]['data']['bandit_total']
+            html_content += f"""
+            <li><strong>Bandit:</strong> {initial_total_bandit} vulnerabilities initially → {final_total_bandit} finally</li>"""
+            
+            initial_total_semgrep = phases[0]['data']['semgrep_total']
+            final_total_semgrep = phases[-1]['data']['semgrep_total']
+            html_content += f"""
+            <li><strong>Semgrep:</strong> {initial_total_semgrep} vulnerabilities initially → {final_total_semgrep} finally</li>"""
+        
+        html_content += """
+        </ul>
+        
+        <script>
+            // Overlap Evolution Chart
+            const ctx1 = document.getElementById('overlapEvolutionChart').getContext('2d');
+            new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: """ + str(phase_labels) + """,
+                    datasets: [
+                        {
+                            label: '3-Way Overlap (All Tools)',
+                            data: """ + str(three_way_data) + """,
+                            borderColor: '#1abc9c',
+                            backgroundColor: 'rgba(26, 188, 156, 0.1)',
+                            borderWidth: 3,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Custom-Bandit Overlap',
+                            data: """ + str(custom_bandit_data) + """,
+                            borderColor: '#3498db',
+                            backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Custom-Semgrep Overlap',
+                            data: """ + str(custom_semgrep_data) + """,
+                            borderColor: '#9b59b6',
+                            backgroundColor: 'rgba(155, 89, 182, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Bandit-Semgrep Overlap',
+                            data: """ + str(bandit_semgrep_data) + """,
+                            borderColor: '#e74c3c',
+                            backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Tool Agreement Evolution Across Phases',
+                            font: { size: 16 }
+                        },
+                        legend: {
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Number of CWEs'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Analysis Phase'
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Total Vulnerabilities Chart
+            const ctx2 = document.getElementById('totalVulnsChart').getContext('2d');
+            new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: """ + str(phase_labels) + """,
+                    datasets: [
+                        {
+                            label: 'Custom Detector',
+                            data: """ + str(custom_total_data) + """,
+                            backgroundColor: 'rgba(52, 152, 219, 0.7)'
+                        },
+                        {
+                            label: 'Bandit',
+                            data: """ + str(bandit_total_data) + """,
+                            backgroundColor: 'rgba(231, 76, 60, 0.7)'
+                        },
+                        {
+                            label: 'Semgrep',
+                            data: """ + str(semgrep_total_data) + """,
+                            backgroundColor: 'rgba(155, 89, 182, 0.7)'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Total Vulnerabilities Per Tool Per Phase',
+                            font: { size: 16 }
+                        },
+                        legend: {
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Number of Vulnerabilities'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Analysis Phase'
+                            }
+                        }
+                    }
+                }
+            });
+        </script>
+    </div>
+</body>
+</html>"""
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        
+        print(f"✅ 3-way overlap evolution report saved: {filename}")
+        return filename
+
+
+
 
 
 # Backwards compatibility function

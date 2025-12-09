@@ -647,7 +647,7 @@ class App:
         
         # Detected Vulnerabilities Custom Detector- Collect from initial and all iterations
         st.markdown("### 🔴 Custom Detector Vulnerability")
-        st.info("ℹ️ This table shows the vulnerabilities identified in the initial source code.  For patching iteration verbosity, please refer to the report section.")
+        st.info("ℹ️ This table shows the vulnerabilities identified in the initial source code.  For patch iteration verbosity, please refer to the report section.")
 
         # Collect initial vulnerabilities only
         initial_vulns = results.get('vulnerabilities_with_explanations', [])
@@ -1123,8 +1123,8 @@ class App:
 
         # Bandit table (if any)
         if combined_issues:
-            st.markdown("### 🔴 Detected Vulnerabilities - Bandit")
-            st.info("ℹ️ This table shows the vulnerabilities identified by Bandit tool in the initial source code. For patching iteration verbosity, please refer to the report section.")
+            st.markdown("### 🔴 Detected Vulnerabilities")
+            st.info("ℹ️ This table shows the vulnerabilities identified by Bandit tool in the initial source code. For patch iteration verbosity, please refer to the report section.")
             df = pd.DataFrame(combined_issues)
             df.insert(0, 'SL.No', range(1, len(df) + 1))
             st.dataframe(df, use_container_width=True, hide_index=True)
@@ -1133,7 +1133,7 @@ class App:
 
         # Semgrep table (always show when available)
         if semgrep_original_count > 0:
-            st.info("ℹ️ This table shows the vulnerabilities identified by Semgrep tool in the initial source code. For patching iteration verbosity, please refer to the report section.")
+            st.info("ℹ️ This table shows the vulnerabilities identified by Semgrep tool in the initial source code. For patch iteration verbosity, please refer to the report section.")
             semgrep_issues_data = []
             for idx, issue in enumerate(secondary_original.get('issues', []), 1):
                 line_num = 'Unknown'
@@ -1165,34 +1165,8 @@ class App:
             if semgrep_issues_data:
                 st.dataframe(pd.DataFrame(semgrep_issues_data), use_container_width=True, hide_index=True)
 
-        # Get metrics early for use in cross-validation section
+        # Get metrics early for use in metrics section
         metrics = results.get('metrics', {})
-        
-        # Tool Comparison and Cross-Validation
-        st.markdown("### 🔄 Analysis Summary")
-        st.info("_Total vulnerabilities from all detection tools across all iterations_")
-        
-        col_compare1, col_compare2 = st.columns(2)
-        
-        with col_compare1:
-            with st.expander("📊 Total Vulnerabilities Detected"):                
-                total_detected = (
-                    metrics.get('total_detected_all_occurrences')
-                    or results.get('total_vulns_found_all_occurrences')
-                    or len(results.get('all_found_vulns_occurrences', []))
-                    or metrics.get('total_detected', 0)
-                )
-                custom_total = results.get('total_custom_count', 0)
-                bandit_total = results.get('total_bandit_count', 0)
-                semgrep_total = results.get('total_semgrep_count', 0)
-                total_remaining = metrics.get('total_remaining', 0)
-
-                st.write(f"- Total detected: **{total_detected}** vulnerabilities")
-                st.write(f"- Custom Detector: **{custom_total}**")
-                st.write(f"- Bandit: **{bandit_total}**")
-                st.write(f"- Semgrep: **{semgrep_total}**")
-                st.write(f"\n**Total Remaining: {total_remaining}**")
-        
         
         # Metrics
         st.markdown("### 📊 Effectiveness Metrics")
@@ -1201,7 +1175,7 @@ class App:
             patching_eff = metrics.get('patching_effectiveness', {})
             tool_comp = metrics.get('tool_comparison', {})
 
-            st.markdown("#### Patching Effectiveness (Summary)")
+            st.markdown("#### Patch Effectiveness Summary")
             eff_rows = [{
                 'Sl.No': 1,
                 'Fix Rate': f"{patching_eff.get('fix_rate', 0):.1%}",
@@ -1252,6 +1226,21 @@ class App:
                         )
             
             with col3:
+                if final_reports.get('3way_evolution') and os.path.exists(final_reports['3way_evolution']):
+                    with open(final_reports['3way_evolution'], 'rb') as f:
+                        st.download_button(
+                            label="📈 Download 3-Way Tool Analysis (HTML)",
+                            data=f.read(),
+                            file_name=os.path.basename(final_reports['3way_evolution']),
+                            mime='text/html',
+                            key='download_3way_evolution'
+                        )
+            
+            # Second row for iteration report
+            st.markdown("")  # spacing
+            col4, col5, col6 = st.columns(3)
+            
+            with col4:
                 # Generate iteration-focused report
                 iteration_report_html = self._generate_iteration_report(results)
                 st.download_button(

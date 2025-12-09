@@ -142,9 +142,17 @@ class MetricsCalculator:
         primary_issues = primary_tool_results.get('issues', [])
         secondary_issues = secondary_tool_results.get('issues', [])
         
-        # Extract line numbers for comparison
+        # Extract line numbers for comparison - handle different formats
         primary_lines = set(issue.get('line_number') for issue in primary_issues if issue.get('line_number'))
-        secondary_lines = set(issue.get('line_number') for issue in secondary_issues if issue.get('line_number'))
+        
+        # Secondary tool (Semgrep) may use 'start'/'end' dictionaries
+        secondary_lines = set()
+        for issue in secondary_issues:
+            line = issue.get('line_number')
+            if not line and 'start' in issue and isinstance(issue['start'], dict):
+                line = issue['start'].get('line')
+            if line:
+                secondary_lines.add(line)
         
         overlap = primary_lines.intersection(secondary_lines)
         primary_only = primary_lines - secondary_lines
@@ -242,7 +250,8 @@ class MetricsCalculator:
         bandit_count = len([v for v in vulns_after_patch if v.get('detection_method') == 'bandit'])
         semgrep_count = len([v for v in vulns_after_patch if v.get('detection_method') == 'semgrep'])
 
-        # fixed_total is not used for raw occurrence count, will be overridden in workflow.py
+        # Calculate fixed total
+        fixed_total = len(detected_vulns) - len(vulns_after_patch)
         
         return {
             'patching_effectiveness': patching_metrics,

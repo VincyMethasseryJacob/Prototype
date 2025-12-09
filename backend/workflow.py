@@ -135,6 +135,16 @@ class VulnerabilityAnalysisWorkflow:
         results['initial_code_deduped_count'] = len(initial_code_deduped)
         results['initial_code_deduped'] = initial_code_deduped
         
+        # 3-way comparison for INITIAL CODE (before any patching)
+        print("\n📊 Calculating 3-way overlap for initial code...")
+        initial_3way_comparison = self.analyzer.compare_three_tools(
+            vulnerabilities,
+            bandit_original,
+            semgrep_original
+        )
+        results['initial_3way_comparison'] = initial_3way_comparison
+        print(f"   Initial code 3-way overlap: {initial_3way_comparison['three_way_overlap_cwes']} CWEs agreed by all tools")
+        
         # Debug: Print found items before dedup
         print(f"\n📊 DEBUG - Initial Code Deduplication:")
         print(f"   Custom detector found: {len(vulnerabilities)} items")
@@ -316,6 +326,15 @@ class VulnerabilityAnalysisWorkflow:
             iteration_1_result['custom_detector_vulns'] = iteration_custom_vulns
             iteration_1_result['bandit_analysis'] = bandit_result
             iteration_1_result['semgrep_analysis'] = semgrep_result
+            
+            # 3-way comparison for ITERATION 1 (after initial patch)
+            iteration_1_3way = self.analyzer.compare_three_tools(
+                remaining_vulns_custom,
+                bandit_result,
+                semgrep_result
+            )
+            iteration_1_result['three_way_comparison'] = iteration_1_3way
+            
             all_iterations.append(iteration_1_result)
             current_code = iteration_1_result['patched_code']
             
@@ -418,6 +437,15 @@ class VulnerabilityAnalysisWorkflow:
                 iteration_result = self._step_patching(current_code, all_vulns)
                 iteration_result['iteration_number'] = iteration_count
                 iteration_result['custom_detector_vulns'] = iteration_custom_vulns
+                
+                # 3-way comparison for this iteration
+                iteration_3way = self.analyzer.compare_three_tools(
+                    remaining_vulns,
+                    bandit_final,
+                    secondary_final
+                )
+                iteration_result['three_way_comparison'] = iteration_3way
+                
                 all_iterations.append(iteration_result)
                 current_code = iteration_result['patched_code']
                 
@@ -488,6 +516,8 @@ class VulnerabilityAnalysisWorkflow:
         # Raw counts (no dedup) for display
         results['total_vulns_found_all_occurrences'] = len(all_found_vulns)
         results['total_iterations_all_occurrences'] = len(iteration_findings)
+        # Keep full raw list for HTML summary (includes custom, Bandit, Semgrep across all phases)
+        results['all_found_vulns_occurrences'] = list(all_found_vulns)
         
         # Store per-tool counts for both initial and iterations
         results['iteration_custom_count'] = iteration_custom_count
@@ -597,6 +627,14 @@ class VulnerabilityAnalysisWorkflow:
         metrics['total_detected_all_occurrences'] = len(all_found_vulns)
         metrics['total_remaining_all_occurrences'] = total_remaining_occurrences
         metrics['iterations_total_all_occurrences'] = len(iteration_findings)
+        # Stage-specific counts (raw occurrences)
+        metrics['initial_custom_count'] = initial_custom_count
+        metrics['initial_bandit_count'] = initial_bandit_count
+        metrics['initial_semgrep_count'] = initial_semgrep_count
+        metrics['initial_total_all_occurrences'] = initial_total_count
+        metrics['iteration_custom_count'] = iteration_custom_count
+        metrics['iteration_bandit_count'] = iteration_bandit_count
+        metrics['iteration_semgrep_count'] = iteration_semgrep_count
         # Per-tool raw totals (all occurrences, no dedup) - sum of initial + iterations for each tool
         metrics['custom_detector_total_all_occurrences'] = initial_custom_count + iteration_custom_count
         metrics['bandit_total_all_occurrences'] = initial_bandit_count + iteration_bandit_count
@@ -618,10 +656,57 @@ class VulnerabilityAnalysisWorkflow:
         semgrep_detected = len([v for v in unique_found_vulns if v.get('detection_method') == 'semgrep'])
         metrics['bandit_initial'] = bandit_detected
         metrics['semgrep_initial'] = semgrep_detected
+        # Provide full raw list for reporting (all tools, all phases)
+        metrics['all_found_vulns_occurrences'] = list(all_found_vulns)
+        
+        # Add 3-way comparison to metrics if available
+        if 'tool_comparison_3way' in results:
+            metrics['tool_comparison_3way'] = results['tool_comparison_3way']
+            print(f"\n📊 3-Way Tool Comparison:")
+            comp = results['tool_comparison_3way']
+            print(f"   Custom Detector: {comp['custom_total']} issues ({comp['custom_unique_cwes']} unique CWEs)")
+            print(f"   Bandit: {comp['bandit_total']} issues ({comp['bandit_unique_cwes']} unique CWEs)")
+            print(f"   Semgrep: {comp['secondary_total']} issues ({comp['secondary_unique_cwes']} unique CWEs)")
+            print(f"\n   2-Way Overlaps (by line):")
+            print(f"      Custom ∩ Bandit: {comp['custom_bandit_overlap_lines']} lines")
+            print(f"      Custom ∩ Semgrep: {comp['custom_secondary_overlap_lines']} lines")
+            print(f"      Bandit ∩ Semgrep: {comp['bandit_secondary_overlap_lines']} lines")
+            print(f"\n   2-Way Overlaps (by CWE):")
+            print(f"      Custom ∩ Bandit: {comp['custom_bandit_overlap_cwes']} CWEs")
+            print(f"      Custom ∩ Semgrep: {comp['custom_secondary_overlap_cwes']} CWEs")
+            print(f"      Bandit ∩ Semgrep: {comp['bandit_secondary_overlap_cwes']} CWEs")
+            print(f"\n   3-Way Overlap (all tools agree):")
+            print(f"      Lines: {comp['three_way_overlap_lines']} ({comp['three_way_line_rate']*100:.1f}%)")
+            print(f"      CWEs: {comp['three_way_overlap_cwes']} ({comp['three_way_cwe_rate']*100:.1f}%)")
+            print(f"\n   Unique to each tool (lines):")
+            print(f"      Custom only: {comp['custom_only_lines']}")
+            print(f"      Bandit only: {comp['bandit_only_lines']}")
+            print(f"      Semgrep only: {comp['secondary_only_lines']}")
+        
         results['metrics'] = metrics
         
         # Step 9: Final Reporting
         print("\n📄 Step 9: Generating final reports...")
+        
+        # Before generating reports, ensure final 3-way comparison is calculated and added to metrics
+        if 'bandit_final' in results and 'secondary_final' in results:
+            final_custom_vulns = self._detect_remaining_vulnerabilities(results.get('final_patched_code', ''))
+            final_3way_comparison = self.analyzer.compare_three_tools(
+                final_custom_vulns,
+                results['bandit_final'],
+                results['secondary_final']
+            )
+            results['final_3way_comparison'] = final_3way_comparison
+            results['metrics']['tool_comparison_3way'] = final_3way_comparison
+            
+            # Collect all 3-way comparisons for evolution report
+            all_3way_comparisons = {
+                'initial_code': results.get('initial_3way_comparison', {}),
+                'iterations': [iter_result.get('three_way_comparison', {}) for iter_result in results.get('patch_iterations', [])],
+                'final_code': final_3way_comparison
+            }
+            results['all_3way_comparisons'] = all_3way_comparisons
+        
         final_reports = self._step_final_reporting(
             results,
             workflow_id
@@ -822,16 +907,19 @@ class VulnerabilityAnalysisWorkflow:
                 f"{workflow_id}_patch"
             )
         
-        # Static analysis report
+        # Static analysis report with comparisons
         if 'bandit_final' in results and 'secondary_final' in results:
-            comparison = self.analyzer.compare_results(
+            # 2-way comparison (Bandit vs Semgrep)
+            comparison_2way = self.analyzer.compare_results(
                 results['bandit_final'],
                 results['secondary_final']
             )
+            results['tool_comparison_2way'] = comparison_2way
+            
             reports['static_analysis'] = self.reporter.export_static_analysis_report(
                 results['bandit_final'],
                 results['secondary_final'],
-                comparison,
+                comparison_2way,
                 f"{workflow_id}_static"
             )
         
@@ -840,6 +928,13 @@ class VulnerabilityAnalysisWorkflow:
             reports['metrics'] = self.reporter.export_metrics_report(
                 results['metrics'],
                 f"{workflow_id}_metrics"
+            )
+        
+        # 3-way overlap evolution report
+        if 'all_3way_comparisons' in results:
+            reports['3way_evolution'] = self.reporter.export_3way_overlap_evolution_report(
+                results,
+                output_dir="test_reports"
             )
         
         # HTML summary
