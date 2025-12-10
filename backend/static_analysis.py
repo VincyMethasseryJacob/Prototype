@@ -268,9 +268,14 @@ class StaticAnalyzer:
                 if isinstance(cwes, list) and cwes:
                     first = str(cwes[0])
                     if first.upper().startswith('CWE-'):
-                        cwe_id = first[4:]
+                        cwe_val = first[4:]
                     else:
-                        cwe_id = first
+                        cwe_val = first
+                    # If the value contains a colon, split and take only the number part
+                    if ':' in cwe_val:
+                        cwe_id = cwe_val.split(':')[0].strip()
+                    else:
+                        cwe_id = cwe_val.strip()
 
                 findings.append({
                     'check_id': r.get('check_id'),
@@ -403,9 +408,48 @@ class StaticAnalyzer:
         secondary_issues = secondary_results.get('issues', [])
         
         # Extract CWE IDs from all three tools
-        custom_cwes = set(v.get('cwe_id') for v in custom_vulns if v.get('cwe_id'))
-        bandit_cwes = set(issue.get('cwe_id') for issue in bandit_issues if issue.get('cwe_id'))
-        secondary_cwes = set(issue.get('cwe_id') for issue in secondary_issues if issue.get('cwe_id'))
+        # IMPORTANT: Normalize all CWE IDs to just the number (e.g., "089") for comparison
+        def normalize_cwe(cwe_val):
+            """Normalize CWE value to 3-digit number format (e.g., '089' from 'CWE-089: SQL')"""
+            if not cwe_val:
+                return None
+            cwe_str = str(cwe_val).strip().upper()
+            # Remove 'CWE-' prefix if present
+            if cwe_str.startswith('CWE-'):
+                cwe_str = cwe_str[4:]
+            # Split on ':' or ' ' to remove descriptions
+            cwe_str = cwe_str.split(':')[0].split()[0].strip()
+            # Ensure it's numeric and pad to 3 digits
+            if cwe_str.isdigit():
+                return cwe_str.zfill(3)  # Pad to 3 digits: '78' -> '078'
+            return None
+        
+        custom_cwes = set(normalize_cwe(v.get('cwe_id')) for v in custom_vulns if v.get('cwe_id'))
+        
+        # Bandit returns issue_cwe as a dict: {"id": 502, "link": "..."}
+        bandit_cwes = set()
+        for issue in bandit_issues:
+            cwe_val = None
+            if 'issue_cwe' in issue and isinstance(issue['issue_cwe'], dict):
+                cwe_val = issue['issue_cwe'].get('id')
+            elif 'cwe_id' in issue:
+                cwe_val = issue.get('cwe_id')
+            normalized = normalize_cwe(cwe_val)
+            if normalized:
+                bandit_cwes.add(normalized)
+        
+        secondary_cwes = set(normalize_cwe(issue.get('cwe_id')) for issue in secondary_issues if issue.get('cwe_id'))
+        
+        # Remove None values
+        custom_cwes.discard(None)
+        bandit_cwes.discard(None)
+        secondary_cwes.discard(None)
+        
+        # Debug: Show what CWE IDs we extracted
+        print(f"\n[DEBUG] compare_three_tools CWE extraction:")
+        print(f"   Custom CWEs: {custom_cwes}")
+        print(f"   Bandit CWEs: {bandit_cwes}")
+        print(f"   Semgrep CWEs: {secondary_cwes}")
         
         # Extract line numbers from all three tools
         # Custom detector uses 'line_number' or 'line'
@@ -429,6 +473,52 @@ class StaticAnalyzer:
             if line:
                 secondary_lines.add(line)
         
+        # Helper function to build detailed overlap info (CWE-line pairs)
+        def get_cwe_line_pairs(vulns, tool_name='custom'):
+            """Extract (CWE ID, line number) pairs from vulnerabilities."""
+            pairs = {}
+            for v in vulns:
+                cwe = v.get('cwe_id')
+                line = v.get('line_number') or v.get('line')
+                if cwe and line:
+                    key = (cwe, line)
+                    if key not in pairs:
+                        pairs[key] = {'cwe': cwe, 'line': line, 'tool': tool_name}
+            return pairs
+        
+        def get_bandit_cwe_line_pairs(issues):
+            """Extract (CWE ID, line number) pairs from Bandit issues."""
+            pairs = {}
+            for issue in issues:
+                cwe = issue.get('cwe_id')
+                line = issue.get('line_number')
+                if cwe and line:
+                    key = (cwe, line)
+                    if key not in pairs:
+                        pairs[key] = {'cwe': cwe, 'line': line, 'tool': 'bandit'}
+            return pairs
+        
+        def get_semgrep_cwe_line_pairs(issues):
+            """Extract (CWE ID, line number) pairs from Semgrep issues."""
+            pairs = {}
+            for issue in issues:
+                cwe = issue.get('cwe_id')
+                line = None
+                if 'start' in issue and isinstance(issue['start'], dict):
+                    line = issue['start'].get('line')
+                elif 'line_number' in issue:
+                    line = issue['line_number']
+                if cwe and line:
+                    key = (cwe, line)
+                    if key not in pairs:
+                        pairs[key] = {'cwe': cwe, 'line': line, 'tool': 'semgrep'}
+            return pairs
+        
+        # Get detailed pairs for each tool
+        custom_pairs = get_cwe_line_pairs(custom_vulns, 'custom')
+        bandit_pairs = get_bandit_cwe_line_pairs(bandit_issues)
+        semgrep_pairs = get_semgrep_cwe_line_pairs(secondary_issues)
+        
         # Calculate 2-way overlaps (by line)
         custom_bandit_lines = custom_lines.intersection(bandit_lines)
         custom_secondary_lines = custom_lines.intersection(secondary_lines)
@@ -444,6 +534,41 @@ class StaticAnalyzer:
         
         # Calculate 3-way overlap (by CWE) - found by all three tools
         three_way_cwes = custom_cwes.intersection(bandit_cwes).intersection(secondary_cwes)
+        
+        # Debug: Show overlaps
+        print(f"   Custom-Bandit CWE overlap: {custom_bandit_cwes}")
+        print(f"   Custom-Semgrep CWE overlap: {custom_secondary_cwes}")
+        print(f"   Bandit-Semgrep CWE overlap: {bandit_secondary_cwes}")
+        print(f"   3-Way CWE overlap: {three_way_cwes}")
+        
+        # Build detailed overlap lists (CWE + line pairs that overlap)
+        custom_bandit_overlap_details = []
+        for pair in custom_pairs:
+            if pair in bandit_pairs:
+                custom_bandit_overlap_details.append(pair)
+        
+        custom_semgrep_overlap_details = []
+        for pair in custom_pairs:
+            if pair in semgrep_pairs:
+                custom_semgrep_overlap_details.append(pair)
+        
+        bandit_semgrep_overlap_details = []
+        for pair in bandit_pairs:
+            if pair in semgrep_pairs:
+                bandit_semgrep_overlap_details.append(pair)
+        
+        three_way_overlap_details = []
+        for pair in custom_pairs:
+            if pair in bandit_pairs and pair in semgrep_pairs:
+                three_way_overlap_details.append(pair)
+        
+        # IMPORTANT: The counts should match the CWE overlaps, not just the pair overlaps
+        # If custom_bandit_cwes = {078, 089}, the details should show those CWEs
+        # Build CWE-only details (not requiring same line number)
+        custom_bandit_cwe_details = list(custom_bandit_cwes)
+        custom_semgrep_cwe_details = list(custom_secondary_cwes)
+        bandit_semgrep_cwe_details = list(bandit_secondary_cwes)
+        three_way_cwe_details = list(three_way_cwes)
         
         # Calculate unique detections (found by only one tool)
         all_lines = custom_lines.union(bandit_lines).union(secondary_lines)
@@ -503,6 +628,18 @@ class StaticAnalyzer:
             # Totals
             'total_unique_lines': total_unique_lines,
             'total_unique_cwes': total_unique_cwes,
+            
+            # Detailed overlap information (CWE-line pairs)
+            'custom_bandit_overlap_details': list(custom_bandit_overlap_details),
+            'custom_secondary_overlap_details': list(custom_semgrep_overlap_details),
+            'bandit_secondary_overlap_details': list(bandit_semgrep_overlap_details),
+            'three_way_overlap_details': list(three_way_overlap_details),
+            
+            # CWE-only overlap details (for compatibility with counts)
+            'custom_bandit_overlap_cwes_list': custom_bandit_cwe_details,
+            'custom_secondary_overlap_cwes_list': custom_semgrep_cwe_details,
+            'bandit_secondary_overlap_cwes_list': bandit_semgrep_cwe_details,
+            'three_way_overlap_cwes_list': three_way_cwe_details,
             
             # Tool summaries
             'custom_severity': self._calculate_severity_breakdown(custom_vulns),

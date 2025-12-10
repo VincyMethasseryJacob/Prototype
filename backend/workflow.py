@@ -85,21 +85,21 @@ class VulnerabilityAnalysisWorkflow:
             'original_code': generated_code
         }
         
-        print(f"🚀 Starting workflow {workflow_id}...")
+        print(f"[WORKFLOW] Starting workflow {workflow_id}...")
         
         # Step 1: Preprocessing
-        print("\n📋 Step 1: Preprocessing code...")
+        print("\n[STEP 1] Preprocessing code...")
         cleaned_code = self._step_preprocessing(generated_code)
         results['cleaned_code'] = cleaned_code
         
         # Step 2: Vulnerability Detection
-        print("\n🔍 Step 2: Detecting vulnerabilities...")
+        print("\n[STEP 2] Detecting vulnerabilities...")
         vulnerabilities = self._step_vulnerability_detection(cleaned_code)
         results['vulnerabilities_detected'] = vulnerabilities
         results['vulnerability_count'] = len(vulnerabilities)
 
         # Also run Bandit and Semgrep on the original (cleaned) code
-        print("\n🔬 Initial Static Analysis on original code (Bandit & Semgrep)...")
+        print("\n Initial Static Analysis on original code (Bandit & Semgrep)...")
         bandit_original = self._step_static_analysis_bandit(cleaned_code)
         semgrep_original = self._step_static_analysis_secondary(cleaned_code)
         results['bandit_original'] = bandit_original
@@ -136,7 +136,7 @@ class VulnerabilityAnalysisWorkflow:
         results['initial_code_deduped'] = initial_code_deduped
         
         # 3-way comparison for INITIAL CODE (before any patching)
-        print("\n📊 Calculating 3-way overlap for initial code...")
+        print("\n[3-WAY] Calculating 3-way overlap for initial code...")
         initial_3way_comparison = self.analyzer.compare_three_tools(
             vulnerabilities,
             bandit_original,
@@ -146,7 +146,7 @@ class VulnerabilityAnalysisWorkflow:
         print(f"   Initial code 3-way overlap: {initial_3way_comparison['three_way_overlap_cwes']} CWEs agreed by all tools")
         
         # Debug: Print found items before dedup
-        print(f"\n📊 DEBUG - Initial Code Deduplication:")
+        print(f"\n[DEBUG] Initial Code Deduplication:")
         print(f"   Custom detector found: {len(vulnerabilities)} items")
         if vulnerabilities:
             for v in vulnerabilities[:3]:
@@ -162,7 +162,7 @@ class VulnerabilityAnalysisWorkflow:
         print(f"   After deduplication by (CWE, line): {len(initial_code_deduped)} unique items")
         
         if not vulnerabilities and not all_found_vulns:
-            print("✅ No vulnerabilities detected by any tool on original code!")
+            print(" No vulnerabilities detected by any tool on original code!")
             results['status'] = 'clean'
             return results
         
@@ -170,14 +170,14 @@ class VulnerabilityAnalysisWorkflow:
         bandit_issues_count = len(bandit_original.get('issues', [])) if bandit_original.get('success') else 0
         semgrep_issues_count = len(semgrep_original.get('issues', [])) if semgrep_original.get('success') else 0
         
-        print(f"\n⚠️  Initial Analysis Results:")
+        print(f"\n  Initial Analysis Results:")
         print(f"   - Custom detector: {len(vulnerabilities)} vulnerabilities")
         if vulnerabilities:
             for vuln in vulnerabilities:
                 cwe_id = vuln.get('cwe_id', 'Unknown')
                 cwe_name = vuln.get('cwe_name', 'Unknown')
                 line = vuln.get('line_number', 'Unknown')
-                print(f"      • CWE-{cwe_id} ({cwe_name}) at line {line}")
+                print(f"       CWE-{cwe_id} ({cwe_name}) at line {line}")
         
         print(f"   - Bandit: {bandit_issues_count} issues")
         if bandit_original.get('success') and bandit_original.get('issues'):
@@ -186,7 +186,7 @@ class VulnerabilityAnalysisWorkflow:
                 test_name = issue.get('test_name', 'Unknown')
                 line = issue.get('line_number', 'Unknown')
                 severity = issue.get('severity', 'Unknown')
-                print(f"      • {test_id} ({test_name}) at line {line} [{severity}]")
+                print(f"       {test_id} ({test_name}) at line {line} [{severity}]")
             if bandit_issues_count > 10:
                 print(f"      ... and {bandit_issues_count - 10} more")
         
@@ -200,25 +200,25 @@ class VulnerabilityAnalysisWorkflow:
                 # Truncate long messages
                 if len(message) > 60:
                     message = message[:57] + "..."
-                print(f"      • {check_id}: {message} at line {line} [{severity}]")
+                print(f"       {check_id}: {message} at line {line} [{severity}]")
             if semgrep_issues_count > 10:
                 print(f"      ... and {semgrep_issues_count - 10} more")
         
         print(f"\n   Total findings across all tools: {len(all_found_vulns)}")
         
         # Step 3: Explainability
-        print("\n💡 Step 3: Generating explanations...")
+        print("\n Step 3: Generating explanations...")
         vulnerabilities = self._step_explainability(vulnerabilities)
         results['vulnerabilities_with_explanations'] = vulnerabilities
         
         # Step 4: Initial Patching
-        print("\n🔧 Step 4: Generating initial patch...")
+        print("\n Step 4: Generating initial patch...")
         patch_result = self._step_patching(cleaned_code, vulnerabilities)
         results['initial_patch_result'] = patch_result
         current_code = patch_result['patched_code']
         
         # Step 5: Analyze Initial Patched Code with All Three Tools
-        print("\n🔬 Step 5: Analyzing initial patched code with all tools...")
+        print("\n Step 5: Analyzing initial patched code with all tools...")
         print("   Running Custom detector...")
         remaining_vulns_custom = self._detect_remaining_vulnerabilities(current_code)
         
@@ -253,13 +253,13 @@ class VulnerabilityAnalysisWorkflow:
         secondary_final = semgrep_result
         
         if total_issues == 0:
-            print("\n✅ Initial patch successful - no vulnerabilities found by any tool!")
+            print("\n Initial patch successful - no vulnerabilities found by any tool!")
             results['patch_iterations'] = all_iterations
             results['total_iterations'] = 0
             results['final_patched_code'] = current_code
         else:
-            print("\n🔄 Step 6: Starting iterative repair process...")
-            print(f"🔄 Iteration 1: {total_issues} issues detected in initial patched code")
+            print("\n Step 6: Starting iterative repair process...")
+            print(f" Iteration 1: {total_issues} issues detected in initial patched code")
             
             # Display details for iteration 1
             if remaining_vulns_custom:
@@ -267,7 +267,7 @@ class VulnerabilityAnalysisWorkflow:
                     cwe_id = vuln.get('cwe_id', 'Unknown')
                     cwe_name = vuln.get('cwe_name', 'Unknown')
                     line = vuln.get('line_number', vuln.get('line', 'Unknown'))
-                    print(f"      • CWE-{cwe_id} ({cwe_name}) at line {line}")
+                    print(f"       CWE-{cwe_id} ({cwe_name}) at line {line}")
             
             if bandit_issues:
                 for issue in bandit_issues:
@@ -275,7 +275,7 @@ class VulnerabilityAnalysisWorkflow:
                     test_name = issue.get('test_name', 'Unknown')
                     line = issue.get('line_number', 'Unknown')
                     severity = issue.get('severity', 'Unknown')
-                    print(f"      • {test_id} ({test_name}) at line {line} [{severity}]")
+                    print(f"       {test_id} ({test_name}) at line {line} [{severity}]")
             
             if semgrep_issues:
                 for issue in semgrep_issues:
@@ -285,7 +285,7 @@ class VulnerabilityAnalysisWorkflow:
                     severity = issue.get('severity', 'Unknown')
                     if len(message) > 60:
                         message = message[:57] + "..."
-                    print(f"      • {check_id}: {message} at line {line} [{severity}]")
+                    print(f"       {check_id}: {message} at line {line} [{severity}]")
             
             # Combine all vulnerabilities for iteration 1
             all_vulns = remaining_vulns_custom + bandit_vulns + semgrep_vulns
@@ -335,6 +335,16 @@ class VulnerabilityAnalysisWorkflow:
             )
             iteration_1_result['three_way_comparison'] = iteration_1_3way
             
+            # Debug output
+            print(f"\n[DEBUG] Iteration 1 3-way comparison:")
+            print(f"   Custom vulnerabilities passed: {len(remaining_vulns_custom)}")
+            print(f"   Bandit issues: {len(bandit_result.get('issues', []))}")
+            print(f"   Semgrep issues: {len(semgrep_result.get('issues', []))}")
+            print(f"   3-way overlap CWEs: {iteration_1_3way.get('three_way_overlap_cwes', 0)}")
+            print(f"   Custom-Bandit overlap CWEs: {iteration_1_3way.get('custom_bandit_overlap_cwes', 0)}")
+            print(f"   Custom-Semgrep overlap CWEs: {iteration_1_3way.get('custom_secondary_overlap_cwes', 0)}")
+            print(f"   Bandit-Semgrep overlap CWEs: {iteration_1_3way.get('bandit_secondary_overlap_cwes', 0)}")
+            
             all_iterations.append(iteration_1_result)
             current_code = iteration_1_result['patched_code']
             
@@ -352,20 +362,20 @@ class VulnerabilityAnalysisWorkflow:
                 total_issues = len(remaining_vulns) + len(bandit_issues) + len(semgrep_issues)
                 
                 if total_issues == 0:
-                    print(f"✅ All vulnerabilities fixed after {iteration_count - 1} iteration(s)!")
+                    print(f" All vulnerabilities fixed after {iteration_count - 1} iteration(s)!")
                     print(f"   - Custom detector: 0 vulnerabilities")
                     print(f"   - Bandit: 0 issues")
                     print(f"   - Semgrep: 0 issues")
                     break
                 
-                print(f"🔄 Iteration {iteration_count}: {total_issues} total issues found")
+                print(f" Iteration {iteration_count}: {total_issues} total issues found")
                 print(f"   - Custom detector: {len(remaining_vulns)} vulnerabilities")
                 if remaining_vulns:
                     for vuln in remaining_vulns:
                         cwe_id = vuln.get('cwe_id', 'Unknown')
                         cwe_name = vuln.get('cwe_name', 'Unknown')
                         line = vuln.get('line_number', vuln.get('line', 'Unknown'))
-                        print(f"      • CWE-{cwe_id} ({cwe_name}) at line {line}")
+                        print(f"       CWE-{cwe_id} ({cwe_name}) at line {line}")
                 
                 print(f"   - Bandit: {len(bandit_issues)} issues")
                 if bandit_issues:
@@ -374,7 +384,7 @@ class VulnerabilityAnalysisWorkflow:
                         test_name = issue.get('test_name', 'Unknown')
                         line = issue.get('line_number', 'Unknown')
                         severity = issue.get('severity', 'Unknown')
-                        print(f"      • {test_id} ({test_name}) at line {line} [{severity}]")
+                        print(f"       {test_id} ({test_name}) at line {line} [{severity}]")
                 
                 print(f"   - Semgrep: {len(semgrep_issues)} issues")
                 if semgrep_issues:
@@ -386,7 +396,7 @@ class VulnerabilityAnalysisWorkflow:
                         # Truncate long messages
                         if len(message) > 60:
                             message = message[:57] + "..."
-                        print(f"      • {check_id}: {message} at line {line} [{severity}]")
+                        print(f"       {check_id}: {message} at line {line} [{severity}]")
                 
                 # Convert Bandit issues to vulnerability format for patching
                 bandit_vulns = self._convert_bandit_to_vulns(bandit_issues, current_code)
@@ -413,7 +423,7 @@ class VulnerabilityAnalysisWorkflow:
                 iteration_semgrep_count += len(semgrep_vulns)
                 
                 if not all_vulns:
-                    print("✅ No vulnerabilities to patch!")
+                    print(" No vulnerabilities to patch!")
                     break
                 
                 # Patch again with all detected issues
@@ -446,6 +456,16 @@ class VulnerabilityAnalysisWorkflow:
                 )
                 iteration_result['three_way_comparison'] = iteration_3way
                 
+                # Debug output
+                print(f"\n[DEBUG] Iteration {iteration_count} 3-way comparison:")
+                print(f"   Custom vulnerabilities passed: {len(remaining_vulns)}")
+                print(f"   Bandit issues: {len(bandit_final.get('issues', []))}")
+                print(f"   Semgrep issues: {len(secondary_final.get('issues', []))}")
+                print(f"   3-way overlap CWEs: {iteration_3way.get('three_way_overlap_cwes', 0)}")
+                print(f"   Custom-Bandit overlap CWEs: {iteration_3way.get('custom_bandit_overlap_cwes', 0)}")
+                print(f"   Custom-Semgrep overlap CWEs: {iteration_3way.get('custom_secondary_overlap_cwes', 0)}")
+                print(f"   Bandit-Semgrep overlap CWEs: {iteration_3way.get('bandit_secondary_overlap_cwes', 0)}")
+                
                 all_iterations.append(iteration_result)
                 current_code = iteration_result['patched_code']
                 
@@ -459,12 +479,12 @@ class VulnerabilityAnalysisWorkflow:
             results['final_patched_code'] = current_code
         
         # Step 7: Final Static Analysis (use latest results from loop)
-        print("\n🔬 Step 7: Recording final static analysis results...")
+        print("\n Step 7: Recording final static analysis results...")
         results['bandit_final'] = bandit_final
         results['secondary_final'] = secondary_final
         
         # Step 8: Evaluation and Metrics
-        print("\n📈 Step 8: Calculating metrics...")
+        print("\n[STEP 8] Calculating metrics...")
         # Combine vulnerabilities from all three tools
         bandit_final_vulns = self._convert_bandit_to_vulns(
             bandit_final.get('issues', []) if bandit_final.get('success') else [],
@@ -494,11 +514,11 @@ class VulnerabilityAnalysisWorkflow:
         iterations_only_deduped = self._deduplicate_vulns_by_line([iteration_findings])
         results['all_iterations_deduped_count'] = len(iterations_only_deduped)
         results['all_iterations_deduped'] = iterations_only_deduped
-        print(f"📊 DEBUG Iterations Only Deduped Count: {len(iterations_only_deduped)} (total before dedup: {len(iteration_findings)})")
+        print(f"[DEBUG] Iterations Only Deduped Count: {len(iterations_only_deduped)} (total before dedup: {len(iteration_findings)})")
         
         # Calculate all findings (initial + iterations) for total detected metric
         all_findings_deduped = self._deduplicate_vulns_by_line([all_found_vulns])
-        print(f"📊 DEBUG All Findings Deduped Count: {len(all_findings_deduped)} (total before dedup: {len(all_found_vulns)})")
+        print(f"[DEBUG] All Findings Deduped Count: {len(all_findings_deduped)} (total before dedup: {len(all_found_vulns)})")
         
         # Keep unique_found_vulns for backward compatibility with other code
         seen_vulns = set()
@@ -639,10 +659,10 @@ class VulnerabilityAnalysisWorkflow:
         metrics['custom_detector_total_all_occurrences'] = initial_custom_count + iteration_custom_count
         metrics['bandit_total_all_occurrences'] = initial_bandit_count + iteration_bandit_count
         metrics['semgrep_total_all_occurrences'] = initial_semgrep_count + iteration_semgrep_count
-        print(f"📊 DEBUG Metrics Before Setting:")
+        print(f"[DEBUG] Metrics Before Setting:")
         print(f"   initial_code_deduped_count from results: {results.get('initial_code_deduped_count')}")
         print(f"   all_iterations_deduped_count from results: {results.get('all_iterations_deduped_count')}")
-        print(f"📊 DEBUG Metrics After Calculate:")
+        print(f"[DEBUG] Metrics After Calculate:")
         print(f"   initial_code_deduped_count in metrics: {metrics.get('initial_code_deduped_count')}")
         print(f"   all_iterations_deduped_count in metrics: {metrics.get('all_iterations_deduped_count')}")
         print(f"   total_detected (unique CWE count): {metrics.get('total_detected')}")
@@ -662,19 +682,19 @@ class VulnerabilityAnalysisWorkflow:
         # Add 3-way comparison to metrics if available
         if 'tool_comparison_3way' in results:
             metrics['tool_comparison_3way'] = results['tool_comparison_3way']
-            print(f"\n📊 3-Way Tool Comparison:")
+            print(f"\n[DEBUG] 3-Way Tool Comparison:")
             comp = results['tool_comparison_3way']
             print(f"   Custom Detector: {comp['custom_total']} issues ({comp['custom_unique_cwes']} unique CWEs)")
             print(f"   Bandit: {comp['bandit_total']} issues ({comp['bandit_unique_cwes']} unique CWEs)")
             print(f"   Semgrep: {comp['secondary_total']} issues ({comp['secondary_unique_cwes']} unique CWEs)")
             print(f"\n   2-Way Overlaps (by line):")
-            print(f"      Custom ∩ Bandit: {comp['custom_bandit_overlap_lines']} lines")
-            print(f"      Custom ∩ Semgrep: {comp['custom_secondary_overlap_lines']} lines")
-            print(f"      Bandit ∩ Semgrep: {comp['bandit_secondary_overlap_lines']} lines")
+            print(f"      Custom  Bandit: {comp['custom_bandit_overlap_lines']} lines")
+            print(f"      Custom  Semgrep: {comp['custom_secondary_overlap_lines']} lines")
+            print(f"      Bandit  Semgrep: {comp['bandit_secondary_overlap_lines']} lines")
             print(f"\n   2-Way Overlaps (by CWE):")
-            print(f"      Custom ∩ Bandit: {comp['custom_bandit_overlap_cwes']} CWEs")
-            print(f"      Custom ∩ Semgrep: {comp['custom_secondary_overlap_cwes']} CWEs")
-            print(f"      Bandit ∩ Semgrep: {comp['bandit_secondary_overlap_cwes']} CWEs")
+            print(f"      Custom  Bandit: {comp['custom_bandit_overlap_cwes']} CWEs")
+            print(f"      Custom  Semgrep: {comp['custom_secondary_overlap_cwes']} CWEs")
+            print(f"      Bandit  Semgrep: {comp['bandit_secondary_overlap_cwes']} CWEs")
             print(f"\n   3-Way Overlap (all tools agree):")
             print(f"      Lines: {comp['three_way_overlap_lines']} ({comp['three_way_line_rate']*100:.1f}%)")
             print(f"      CWEs: {comp['three_way_overlap_cwes']} ({comp['three_way_cwe_rate']*100:.1f}%)")
@@ -686,7 +706,7 @@ class VulnerabilityAnalysisWorkflow:
         results['metrics'] = metrics
         
         # Step 9: Final Reporting
-        print("\n📄 Step 9: Generating final reports...")
+        print("\n Step 9: Generating final reports...")
         
         # Before generating reports, ensure final 3-way comparison is calculated and added to metrics
         if 'bandit_final' in results and 'secondary_final' in results:
@@ -717,11 +737,11 @@ class VulnerabilityAnalysisWorkflow:
         if len(total_remaining_vulns) == 0:
             results['status'] = 'fully_patched'
             results['show_patch_info_message'] = False
-            print("\n✅ Workflow completed successfully - all vulnerabilities patched!")
+            print("\n Workflow completed successfully - all vulnerabilities patched!")
         else:
             results['status'] = 'partially_patched'
             results['show_patch_info_message'] = True
-            print(f"\n⚠️  Workflow completed - {len(total_remaining_vulns)} vulnerabilities remain")
+            print(f"\n  Workflow completed - {len(total_remaining_vulns)} vulnerabilities remain")
         return results
     
     def _step_preprocessing(self, code: str) -> str:
@@ -805,17 +825,32 @@ class VulnerabilityAnalysisWorkflow:
         """
         vulnerabilities = []
         code_lines = code.split('\n')
+
+        def normalize_cwe(cwe_val):
+            """Return 3-digit CWE string (e.g., 78 -> '078')."""
+            if not cwe_val:
+                return '1035'
+            s = str(cwe_val).strip()
+            if s.upper().startswith('CWE-'):
+                s = s[4:]
+            s = s.split(':')[0].split()[0]
+            return s.zfill(3) if s.isdigit() else '1035'
         
         for issue in bandit_issues:
             line_num = issue.get('line_number', 0)
             snippet = code_lines[line_num - 1] if 0 < line_num <= len(code_lines) else ''
             
             # Use CWE ID from Bandit (available in 1.7.5+)
-            cwe_id = issue.get('cwe_id', '1035')  # Default to CWE-1035 if not provided
+            # Bandit returns issue_cwe as a dict: {"id": 502, "link": "..."}
+            cwe_id = '1035'  # Default
+            if 'issue_cwe' in issue and isinstance(issue['issue_cwe'], dict):
+                cwe_id = normalize_cwe(issue['issue_cwe'].get('id'))
+            elif 'cwe_id' in issue:
+                cwe_id = normalize_cwe(issue.get('cwe_id', '1035'))
             
             vuln = {
                 'cwe_id': cwe_id,
-                'cwe_name': issue.get('test_name', 'Unknown'),
+                'cwe_name': self.detector._get_cwe_name(cwe_id) if hasattr(self, 'detector') else issue.get('test_name', 'Unknown'),
                 'severity': issue.get('severity', 'MEDIUM').upper(),
                 'confidence': issue.get('confidence', 'MEDIUM'),
                 'line': line_num,
@@ -842,17 +877,27 @@ class VulnerabilityAnalysisWorkflow:
         """
         vulnerabilities = []
         code_lines = code.split('\n')
+
+        def normalize_cwe(cwe_val):
+            """Return 3-digit CWE string (e.g., '89' -> '089')."""
+            if not cwe_val:
+                return '1035'
+            s = str(cwe_val).strip()
+            if s.upper().startswith('CWE-'):
+                s = s[4:]
+            s = s.split(':')[0].split()[0]
+            return s.zfill(3) if s.isdigit() else '1035'
         
         for issue in semgrep_issues:
             line_num = issue.get('start', {}).get('line', 0) or issue.get('end', {}).get('line', 0)
             snippet = code_lines[line_num - 1] if 0 < line_num <= len(code_lines) else ''
             
-            # Use CWE ID from Semgrep metadata (available in recent versions)
-            cwe_id = issue.get('cwe_id', '1035')  # Default to CWE-1035 if not provided
+            # Use CWE ID from Semgrep metadata (normalize to 3-digit)
+            cwe_id = normalize_cwe(issue.get('cwe_id', '1035'))
             
             vuln = {
                 'cwe_id': cwe_id,
-                'cwe_name': self.detector._get_cwe_name(cwe_id) if cwe_id else 'Unknown',
+                'cwe_name': self.detector._get_cwe_name(cwe_id) if hasattr(self, 'detector') else 'Unknown',
                 'severity': issue.get('severity', 'MEDIUM').upper(),
                 'confidence': 'MEDIUM',
                 'line': line_num,
@@ -936,6 +981,13 @@ class VulnerabilityAnalysisWorkflow:
                 results,
                 output_dir="test_reports"
             )
+            
+            # Also generate detailed overlap report for final comparison
+            if 'final_3way_comparison' in results:
+                reports['overlap_details'] = self.reporter.export_overlap_details_report(
+                    results['final_3way_comparison'],
+                    output_dir="test_reports"
+                )
         
         # HTML summary
         if 'vulnerabilities_with_explanations' in results:

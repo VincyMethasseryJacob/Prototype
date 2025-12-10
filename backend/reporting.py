@@ -277,7 +277,7 @@ class VulnerabilityReporter:
         .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
         h2 { color: #34495e; margin-top: 30px; }
-        .chart-container { margin: 30px 0; padding: 20px; background: #fafafa; border-radius: 8px; position: relative; height: 400px; }
+        .chart-container { margin: 30px 0; padding: 20px; background: #fafafa; border-radius: 8px; position: relative; width: 100%; height: 400px; }
         .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }
         .metric-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .metric-card h3 { margin: 0 0 10px 0; font-size: 14px; opacity: 0.9; }
@@ -369,87 +369,110 @@ class VulnerabilityReporter:
     </div>
     
     <script>
-    </div>
-    
-    <script>
+        console.log('Starting chart initialization...');
+        
         // Severity Distribution Chart
-        const severityCtx = document.getElementById('severityChart').getContext('2d');
-        new Chart(severityCtx, {
-            type: 'bar',
-            data: {
-                labels: ['Total Detected', 'Remaining Unfixed'],
-                datasets: [
-                    {
-                        label: 'High Severity',
-                        data: [""" + str(sev_before_high) + """, """ + str(sev_after_high) + """],
-                        backgroundColor: '#e74c3c'
-                    },
-                    {
-                        label: 'Medium Severity',
-                        data: [""" + str(sev_before_med) + """, """ + str(sev_after_med) + """],
-                        backgroundColor: '#f39c12'
-                    },
-                    {
-                        label: 'Low Severity',
-                        data: [""" + str(sev_before_low) + """, """ + str(sev_after_low) + """],
-                        backgroundColor: '#2ecc71'
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Vulnerability Severity: All Detected vs. Remaining Unfixed' },
-                    legend: { position: 'top' }
+        try {
+            const severityCtx = document.getElementById('severityChart').getContext('2d');
+            console.log('Severity chart data:', {
+                high: [""" + str(sev_before_high) + """, """ + str(sev_after_high) + """],
+                medium: [""" + str(sev_before_med) + """, """ + str(sev_after_med) + """],
+                low: [""" + str(sev_before_low) + """, """ + str(sev_after_low) + """]
+            });
+            new Chart(severityCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['Total Detected', 'Remaining Unfixed'],
+                    datasets: [
+                        {
+                            label: 'High Severity',
+                            data: [""" + str(sev_before_high) + """, """ + str(sev_after_high) + """],
+                            backgroundColor: '#e74c3c'
+                        },
+                        {
+                            label: 'Medium Severity',
+                            data: [""" + str(sev_before_med) + """, """ + str(sev_after_med) + """],
+                            backgroundColor: '#f39c12'
+                        },
+                        {
+                            label: 'Low Severity',
+                            data: [""" + str(sev_before_low) + """, """ + str(sev_after_low) + """],
+                            backgroundColor: '#2ecc71'
+                        }
+                    ]
                 },
-                scales: {
-                    y: { beginAtZero: true, title: { display: true, text: 'Count' } }
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: { display: true, text: 'Vulnerability Severity: All Detected vs. Remaining Unfixed' },
+                        legend: { position: 'top' }
+                    },
+                    scales: {
+                        y: { beginAtZero: true, title: { display: true, text: 'Count' } }
+                    }
                 }
-            }
-        });
+            });
+            console.log('Severity chart created successfully');
+        } catch (e) {
+            console.error('Severity chart error:', e);
+        }
         
         // Tool Comparison Chart
-        const toolCtx = document.getElementById('toolChart').getContext('2d');
-        new Chart(toolCtx, {
-            type: 'doughnut',
-            data: {
-                labels: ['Custom Detector', 'Bandit', 'Semgrep'],
-                datasets: [{
-                    data: [""" + str(custom_total) + """, """ + str(bandit_total) + """, """ + str(semgrep_total) + """],
-                    backgroundColor: ['#3498db', '#9b59b6', '#e67e22']
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Vulnerabilities Detected by Each Tool (All Phases)' },
-                    legend: { position: 'right' }
+        try {
+            const toolCtx = document.getElementById('toolChart').getContext('2d');
+            console.log('Tool chart data:', [""" + str(custom_total) + """, """ + str(bandit_total) + """, """ + str(semgrep_total) + """]);
+            new Chart(toolCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Custom Detector', 'Bandit', 'Semgrep'],
+                    datasets: [{
+                        data: [""" + str(custom_total) + """, """ + str(bandit_total) + """, """ + str(semgrep_total) + """],
+                        backgroundColor: ['#3498db', '#9b59b6', '#e67e22']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: { display: true, text: 'Vulnerabilities Detected by Each Tool (All Phases)' },
+                        legend: { position: 'right' }
+                    }
                 }
-            }
-        });
+            });
+            console.log('Tool chart created successfully');
+        } catch (e) {
+            console.error('Tool chart error:', e);
+        }
         
         // Patching Effectiveness Chart
-        const patchCtx = document.getElementById('patchingChart').getContext('2d');
-        new Chart(patchCtx, {
-            type: 'pie',
-            data: {
-                labels: ['Fixed', 'Remaining'],
-                datasets: [{
-                    data: [""" + str(total_fixed) + """, """ + str(total_remaining) + """],
-                    backgroundColor: ['#27ae60', '#e74c3c']
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Vulnerabilities Fixed vs Remaining' },
-                    legend: { position: 'bottom' }
+        try {
+            const patchCtx = document.getElementById('patchingChart').getContext('2d');
+            console.log('Patch chart data:', [""" + str(total_fixed) + """, """ + str(total_remaining) + """]);
+            new Chart(patchCtx, {
+                type: 'pie',
+                data: {
+                    labels: ['Fixed', 'Remaining'],
+                    datasets: [{
+                        data: [""" + str(total_fixed) + """, """ + str(total_remaining) + """],
+                        backgroundColor: ['#27ae60', '#e74c3c']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: { display: true, text: 'Vulnerabilities Fixed vs Remaining' },
+                        legend: { position: 'bottom' }
+                    }
                 }
-            }
-        });
+            });
+            console.log('Patch chart created successfully');
+        } catch (e) {
+            console.error('Patch chart error:', e);
+        }
+        
+        console.log('All charts initialized');
     </script>
 </body>
 </html>
@@ -685,23 +708,31 @@ class VulnerabilityReporter:
         
         # Helper function to extract data safely
         def get_comparison_data(comparison):
-            # Handle both list and integer values (some fields return len(), others return lists)
-            def safe_len(value):
-                if isinstance(value, (list, set)):
-                    return len(value)
-                elif isinstance(value, int):
-                    return value
-                else:
-                    return 0
-            
+            # Always use len() for overlap keys, as they are lists/sets; fallback to int if needed
+            def count(val):
+                if isinstance(val, (list, set)):
+                    return len(val)
+                elif isinstance(val, int):
+                    return val
+                return 0
+
+            def safe_list(val):
+                if isinstance(val, (list, set, tuple)):
+                    return list(val)
+                return []
             return {
-                'custom_only': safe_len(comparison.get('custom_only_cwes', 0)),
-                'bandit_only': safe_len(comparison.get('bandit_only_cwes', 0)),
-                'semgrep_only': safe_len(comparison.get('secondary_only_cwes', 0)),
-                'custom_bandit': safe_len(comparison.get('custom_bandit_overlap_cwes', 0)),
-                'custom_semgrep': safe_len(comparison.get('custom_secondary_overlap_cwes', 0)),
-                'bandit_semgrep': safe_len(comparison.get('bandit_secondary_overlap_cwes', 0)),
-                'three_way': safe_len(comparison.get('three_way_overlap_cwes', 0)),
+                'custom_only': count(comparison.get('custom_only_cwes', [])),
+                'bandit_only': count(comparison.get('bandit_only_cwes', [])),
+                'semgrep_only': count(comparison.get('secondary_only_cwes', [])),
+                'custom_bandit': count(comparison.get('custom_bandit_overlap_cwes', [])),
+                'custom_semgrep': count(comparison.get('custom_secondary_overlap_cwes', [])),
+                'bandit_semgrep': count(comparison.get('bandit_secondary_overlap_cwes', [])),
+                'three_way': count(comparison.get('three_way_overlap_cwes', [])),
+                # Use *_overlap_cwes_list for detailed table
+                'custom_bandit_list': comparison.get('custom_bandit_overlap_cwes_list', []),
+                'custom_semgrep_list': comparison.get('custom_secondary_overlap_cwes_list', []),
+                'bandit_semgrep_list': comparison.get('bandit_secondary_overlap_cwes_list', []),
+                'three_way_list': comparison.get('three_way_overlap_cwes_list', []),
                 'custom_total': comparison.get('custom_total', 0),
                 'bandit_total': comparison.get('bandit_total', 0),
                 'semgrep_total': comparison.get('secondary_total', 0)
@@ -745,6 +776,14 @@ class VulnerabilityReporter:
         custom_total_data = [p['data']['custom_total'] for p in phases]
         bandit_total_data = [p['data']['bandit_total'] for p in phases]
         semgrep_total_data = [p['data']['semgrep_total'] for p in phases]
+        
+        # Debug output
+        print(f"\n📊 Debug: 3-Way Overlap Evolution Report Data")
+        print(f"   Phases: {phase_labels}")
+        print(f"   3-Way data: {three_way_data}")
+        print(f"   Custom-Bandit data: {custom_bandit_data}")
+        print(f"   Custom-Semgrep data: {custom_semgrep_data}")
+        print(f"   Bandit-Semgrep data: {bandit_semgrep_data}")
         
         # Generate HTML
         html_content = """<!DOCTYPE html>
@@ -882,6 +921,39 @@ class VulnerabilityReporter:
                     <td>{data['bandit_semgrep']}</td>
                 </tr>"""
         
+        html_content += """
+            </tbody>
+        </table>
+
+        <h2>Overlap Details by Phase (CWE IDs)</h2>
+        <table class="phase-table">
+            <thead>
+                <tr>
+                    <th>Phase</th>
+                    <th>3-Way (Custom ∩ Bandit ∩ Semgrep)</th>
+                    <th>Custom ∩ Bandit</th>
+                    <th>Custom ∩ Semgrep</th>
+                    <th>Bandit ∩ Semgrep</th>
+                </tr>
+            </thead>
+            <tbody>"""
+
+        def fmt_list(vals):
+            if not vals:
+                return "–"
+            return ", ".join(sorted(str(v) for v in vals))
+
+        for phase in phases:
+            data = phase['data']
+            html_content += f"""
+                <tr>
+                    <td><strong>{phase['name']}</strong></td>
+                    <td>{fmt_list(data.get('three_way_list', []))}</td>
+                    <td>{fmt_list(data.get('custom_bandit_list', []))}</td>
+                    <td>{fmt_list(data.get('custom_semgrep_list', []))}</td>
+                    <td>{fmt_list(data.get('bandit_semgrep_list', []))}</td>
+                </tr>"""
+
         html_content += """
             </tbody>
         </table>
@@ -1074,9 +1146,285 @@ class VulnerabilityReporter:
         
         print(f"✅ 3-way overlap evolution report saved: {filename}")
         return filename
-
-
-
+    
+    def export_overlap_details_report(self, comparison_result: Dict, output_dir: str = "test_reports") -> str:
+        """
+        Generate detailed report showing which CWEs overlap at which line numbers.
+        
+        Args:
+            comparison_result: Result from compare_three_tools method
+            output_dir: Directory to save the report
+            
+        Returns:
+            Path to generated report file
+        """
+        import datetime
+        
+        os.makedirs(output_dir, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(output_dir, f"overlap_details_{timestamp}.html")
+        
+        # Extract details
+        custom_bandit_details = comparison_result.get('custom_bandit_overlap_details', [])
+        custom_semgrep_details = comparison_result.get('custom_secondary_overlap_details', [])
+        bandit_semgrep_details = comparison_result.get('bandit_secondary_overlap_details', [])
+        three_way_details = comparison_result.get('three_way_overlap_details', [])
+        
+        html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tool Overlap Details Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+        }
+        .overlap-section {
+            margin: 30px 0;
+            padding: 20px;
+            border-left: 5px solid #3498db;
+            background-color: #f8f9fa;
+        }
+        .overlap-section.three-way {
+            border-left-color: #1abc9c;
+        }
+        .overlap-section.custom-bandit {
+            border-left-color: #3498db;
+        }
+        .overlap-section.custom-semgrep {
+            border-left-color: #9b59b6;
+        }
+        .overlap-section.bandit-semgrep {
+            border-left-color: #e74c3c;
+        }
+        .details-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        .details-table th, .details-table td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        .details-table th {
+            background-color: #34495e;
+            color: white;
+            font-weight: bold;
+        }
+        .details-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .cwe-badge {
+            display: inline-block;
+            background-color: #e74c3c;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .line-badge {
+            display: inline-block;
+            background-color: #3498db;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .count-badge {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .no-overlaps {
+            color: #95a5a6;
+            font-style: italic;
+            padding: 15px;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 30px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Tool Overlap Details Report</h1>
+        <p><strong>Generated:</strong> """ + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + """</p>
+        
+        <h2>Overview</h2>
+        <div class="chart-container">
+            <canvas id="overlapChart"></canvas>
+        </div>
+        
+        <h2>Detailed Overlaps by Tool Pair</h2>"""
+        
+        # Helper function to generate overlap section
+        def generate_overlap_section(title, details, css_class, color):
+            html = f"""
+        <div class="overlap-section {css_class}">
+            <h3>{title}</h3>
+            <p><strong>Count: <span class="count-badge">{len(details)}</span> overlapping vulnerabilities</strong></p>
+            """
+            if details:
+                html += """
+            <table class="details-table">
+                <thead>
+                    <tr>
+                        <th>CWE ID</th>
+                        <th>Line Number</th>
+                    </tr>
+                </thead>
+                <tbody>"""
+                for item in details:
+                    cwe = item[0] if isinstance(item, tuple) else item.get('cwe', 'Unknown')
+                    line = item[1] if isinstance(item, tuple) else item.get('line', 'Unknown')
+                    html += f"""
+                    <tr>
+                        <td><span class="cwe-badge">CWE-{cwe}</span></td>
+                        <td><span class="line-badge">Line {line}</span></td>
+                    </tr>"""
+                html += """
+                </tbody>
+            </table>"""
+            else:
+                html += """<p class="no-overlaps">No overlapping vulnerabilities found.</p>"""
+            html += """
+        </div>"""
+            return html
+        
+        # Generate sections for each overlap type
+        html_content += generate_overlap_section(
+            "✅ 3-Way Overlap (All Tools Agree)",
+            three_way_details,
+            "three-way",
+            "#1abc9c"
+        )
+        
+        html_content += generate_overlap_section(
+            "Custom Detector & Bandit Overlap",
+            custom_bandit_details,
+            "custom-bandit",
+            "#3498db"
+        )
+        
+        html_content += generate_overlap_section(
+            "Custom Detector & Semgrep Overlap",
+            custom_semgrep_details,
+            "custom-semgrep",
+            "#9b59b6"
+        )
+        
+        html_content += generate_overlap_section(
+            "Bandit & Semgrep Overlap",
+            bandit_semgrep_details,
+            "bandit-semgrep",
+            "#e74c3c"
+        )
+        
+        # Add summary
+        html_content += """
+        <h2>Summary</h2>
+        <table class="details-table">
+            <thead>
+                <tr>
+                    <th>Overlap Type</th>
+                    <th>Count</th>
+                </tr>
+            </thead>
+            <tbody>"""
+        
+        html_content += f"""
+                <tr>
+                    <td><strong>3-Way Overlap (All Tools)</strong></td>
+                    <td>{len(three_way_details)}</td>
+                </tr>
+                <tr>
+                    <td>Custom & Bandit</td>
+                    <td>{len(custom_bandit_details)}</td>
+                </tr>
+                <tr>
+                    <td>Custom & Semgrep</td>
+                    <td>{len(custom_semgrep_details)}</td>
+                </tr>
+                <tr>
+                    <td>Bandit & Semgrep</td>
+                    <td>{len(bandit_semgrep_details)}</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <script>
+            const ctx = document.getElementById('overlapChart').getContext('2d');
+            new Chart(ctx, {{
+                type: 'bar',
+                data: {{
+                    labels: ['3-Way Overlap', 'Custom-Bandit', 'Custom-Semgrep', 'Bandit-Semgrep'],
+                    datasets: [{{
+                        label: 'Number of Overlapping Vulnerabilities (CWE-Line pairs)',
+                        data: [{len(three_way_details)}, {len(custom_bandit_details)}, {len(custom_semgrep_details)}, {len(bandit_semgrep_details)}],
+                        backgroundColor: ['#1abc9c', '#3498db', '#9b59b6', '#e74c3c'],
+                        borderColor: ['#16a085', '#2980b9', '#8e44ad', '#c0392b'],
+                        borderWidth: 2
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {{
+                        title: {{
+                            display: true,
+                            text: 'Tool Overlap Comparison',
+                            font: {{ size: 16 }}
+                        }},
+                        legend: {{
+                            display: true
+                        }}
+                    }},
+                    scales: {{
+                        y: {{
+                            beginAtZero: true,
+                            title: {{
+                                display: true,
+                                text: 'Count of Overlapping Vulnerabilities'
+                            }}
+                        }}
+                    }}
+                }}
+            }});
+        </script>
+    </div>
+</body>
+</html>"""
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        
+        print(f"✅ Overlap details report saved: {filename}")
+        return filename
 
 
 # Backwards compatibility function

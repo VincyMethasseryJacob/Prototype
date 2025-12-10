@@ -249,6 +249,7 @@ class App:
             "last_generated_code": "",
             "last_workflow_result": None,
             "show_analysis_view": False,
+            "analysis_ready": False,
         }
         for k, v in defaults.items():
             if k not in st.session_state:
@@ -334,6 +335,7 @@ class App:
             st.session_state.last_generated_code = None
             st.session_state.last_workflow_result = None
             st.session_state.show_analysis_view = False
+            st.session_state.analysis_ready = False
             st.session_state.active_prompt = ""
 
         # Center: dropdown and prompt box
@@ -422,12 +424,14 @@ class App:
                     total_vulns = custom_count + bandit_count + semgrep_count
                     
                     if total_vulns > 0:
+                        st.session_state.analysis_ready = False
                         st.session_state.show_analysis_view = True
-                    st.rerun()
+                        st.rerun()
+                    else:
+                        st.session_state.analysis_ready = False
+                        st.success("✅ Analysis Complete! No vulnerabilities detected by any tool.")
             
-            # Display results if analysis was run but no vulnerabilities found (staying on same page)
-            if st.session_state.get("last_workflow_result") and not st.session_state.get("show_analysis_view"):
-                self._display_workflow_results(st.session_state.last_workflow_result)
+            # Do not auto-render inline analysis here; keep message visible
 
     # -------------------- DATASET UI --------------------
     def _ui_dataset_prompt(self, wide=False):
@@ -446,13 +450,14 @@ class App:
             st.session_state.last_generated_code = None
             st.session_state.last_workflow_result = None
             st.session_state.show_analysis_view = False
+            st.session_state.analysis_ready = False
             st.session_state.active_prompt = ""
         
         st.markdown(get_dropdown_width_style(230), unsafe_allow_html=True)
         entry = mp[selected]
         content = entry["content"]
         # Show code immediately on selection
-        st.markdown("<div style='font-size:1.1em; font-weight:600; margin-bottom:8px;'>Sample Code</div>", unsafe_allow_html=True)
+        st.markdown("<div style='font-size:1.1em; font-weight:600; margin-bottom:8px;'>Prompt</div>", unsafe_allow_html=True)
         st.markdown(get_code_block_style(), unsafe_allow_html=True)
         st.code(content, language="python")
         # Generate button, small and left-aligned
@@ -526,12 +531,14 @@ class App:
                     total_vulns = custom_count + bandit_count + semgrep_count
                     
                     if total_vulns > 0:
+                        st.session_state.analysis_ready = False
                         st.session_state.show_analysis_view = True
-                    st.rerun()
+                        st.rerun()
+                    else:
+                        st.session_state.analysis_ready = False
+                        st.success("✅ Analysis Complete! No vulnerabilities detected by any tool.")
             
-            # Display results if analysis was run but no vulnerabilities found (staying on same page)
-            if st.session_state.get("last_workflow_result") and not st.session_state.get("show_analysis_view"):
-                self._display_workflow_results(st.session_state.last_workflow_result)
+            # Do not auto-render inline analysis here; keep message visible
 
     # -------------------- UTIL --------------------
     @staticmethod
@@ -590,15 +597,7 @@ class App:
         # Status badge
         status = results.get('status', 'unknown')
         if status == 'clean':
-            st.markdown("<style>div.stAlert{max-width:fit-content !important;}</style>", unsafe_allow_html=True)
-            st.success("✅ No vulnerabilities detected - code is clean.")
             return
-        elif status == 'fully_patched':
-            st.markdown("<style>div.stAlert{max-width:fit-content !important;}</style>", unsafe_allow_html=True)
-            st.success("✅ All vulnerabilities successfully patched.")
-        elif status == 'partially_patched':
-            st.markdown("<style>div.stAlert{max-width:fit-content !important;}</style>", unsafe_allow_html=True)
-            st.warning("⚠️ Some vulnerabilities remain after patching.")
         
         # Summary metrics
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -647,7 +646,6 @@ class App:
         
         # Detected Vulnerabilities Custom Detector- Collect from initial and all iterations
         st.markdown("### 🔴 Custom Detector Vulnerability")
-        st.info("ℹ️ This table shows the vulnerabilities identified in the initial source code.  For patch iteration verbosity, please refer to the report section.")
 
         # Collect initial vulnerabilities only
         initial_vulns = results.get('vulnerabilities_with_explanations', [])
@@ -679,6 +677,7 @@ class App:
             })
         
         if initial_vulns_tracking:
+            st.info("ℹ️ This table shows the vulnerabilities identified in the initial source code.  For patch iteration verbosity, please refer to the report section.")
             # Summary table - initial code vulnerabilities only
             vuln_data = []
             for key, g in initial_vulns_tracking.items():
