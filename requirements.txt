@@ -1,0 +1,12 @@
+# Runtime dependencies for the Streamlit UI
+# Aligns with pyproject.toml and backend requirements
+bandit>=1.8.6,<2.0.0
+semgrep>=1.0.0
+astroid>=3.0.0
+requests>=2.31.0
+pandas>=2.3.3,<3.0.0
+streamlit>=1.51.0,<2.0.0
+openai>=2.7.2,<3.0.0
+matplotlib>=3.10.7,<4.0.0
+scikit-learn>=1.6.0,<2.0.0
+scipy>=1.14.0,<2.0.0
