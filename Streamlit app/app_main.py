@@ -441,12 +441,18 @@ class App:
             return
         selected = st.selectbox("Select sample:", list(mp.keys()), key="dataset_select")
         
+        # Get entry and content for selected item
+        entry = mp[selected]
+        content = entry["content"]
+        
         # Track dataset selection changes and clear state when different sample is selected
         if "last_selected_dataset" not in st.session_state:
             st.session_state.last_selected_dataset = selected
+            st.session_state.edited_prompt = content
         elif st.session_state.last_selected_dataset != selected:
             # Clear previous results when selecting a different dataset sample
             st.session_state.last_selected_dataset = selected
+            st.session_state.edited_prompt = content  # Reset edited prompt to new selection
             st.session_state.last_generated_code = None
             st.session_state.last_workflow_result = None
             st.session_state.show_analysis_view = False
@@ -454,20 +460,10 @@ class App:
             st.session_state.active_prompt = ""
         
         st.markdown(get_dropdown_width_style(230), unsafe_allow_html=True)
-        entry = mp[selected]
-        content = entry["content"]
         
         # Initialize editing state if not present
         if "dataset_edit_mode" not in st.session_state:
             st.session_state.dataset_edit_mode = False
-        if "edited_prompt" not in st.session_state:
-            st.session_state.edited_prompt = content
-        
-        # Reset edited prompt when selecting different dataset
-        if st.session_state.get("last_selected_dataset") == selected:
-            pass  # Keep existing edited content
-        else:
-            st.session_state.edited_prompt = content
         
         # Show code immediately on selection
         st.markdown("<div style='font-size:1.1em; font-weight:600; margin-bottom:8px;'>Prompt</div>", unsafe_allow_html=True)
@@ -491,7 +487,7 @@ class App:
                 "Edit Prompt",
                 value=st.session_state.edited_prompt,
                 height=200,
-                key="dataset_prompt_editor",
+                key=f"dataset_prompt_editor_{selected}",  # Use selection-based key to force update
                 label_visibility="collapsed"
             )
             content = st.session_state.edited_prompt  # Use edited content for generation
@@ -1282,14 +1278,12 @@ class App:
             }]
             st.table(pd.DataFrame(eff_rows).set_index('Sl.No'))
 
-            st.markdown("#### Tool Comparison")
+            st.markdown("#### Tool Detection Counts")
             comp_rows = [{
                 'Sl.No': 1,
                 'Custom Detector Total': results.get('total_custom_count', 0),
                 'Bandit Total': results.get('total_bandit_count', 0),
-                'Semgrep Total': results.get('total_semgrep_count', 0),
-                'Overlapping Detections': tool_comp.get('overlapping_detections', 0),
-                'Overlap Rate': f"{tool_comp.get('overlap_rate', 0):.1%}"
+                'Semgrep Total': results.get('total_semgrep_count', 0)
             }]
             st.table(pd.DataFrame(comp_rows).set_index('Sl.No'))
         
