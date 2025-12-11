@@ -27,9 +27,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from backend.workflow import VulnerabilityAnalysisWorkflow
 
 # Directories
-TESTCASES_DIR = r"D:\Vincy-Certificates\AIDA\Winter'25\Thesis\Prototype\SecurityEval-main\Testcases_Prompt"
+TESTCASES_DIR = os.path.join(os.path.dirname(__file__), "..", "SecurityEval-main", "Testcases_Prompt")
 AUDIT_DIR = os.path.join(os.path.dirname(__file__), "audit_records")
-VULNERABLE_SAMPLES_DIR = r"D:\Vincy-Certificates\AIDA\Winter'25\Thesis\Prototype\Author_Insecure_Code"
+VULNERABLE_SAMPLES_DIR = os.path.join(os.path.dirname(__file__), "..", "Author_Insecure_Code")
 REPORTS_DIR = os.path.join(os.path.dirname(__file__), "reports")
 
 # Limits
@@ -456,10 +456,47 @@ class App:
         st.markdown(get_dropdown_width_style(230), unsafe_allow_html=True)
         entry = mp[selected]
         content = entry["content"]
+        
+        # Initialize editing state if not present
+        if "dataset_edit_mode" not in st.session_state:
+            st.session_state.dataset_edit_mode = False
+        if "edited_prompt" not in st.session_state:
+            st.session_state.edited_prompt = content
+        
+        # Reset edited prompt when selecting different dataset
+        if st.session_state.get("last_selected_dataset") == selected:
+            pass  # Keep existing edited content
+        else:
+            st.session_state.edited_prompt = content
+        
         # Show code immediately on selection
         st.markdown("<div style='font-size:1.1em; font-weight:600; margin-bottom:8px;'>Prompt</div>", unsafe_allow_html=True)
         st.markdown(get_code_block_style(), unsafe_allow_html=True)
-        st.code(content, language="python")
+        
+        # Toggle button for edit mode
+        col1, col2 = st.columns([0.15, 0.85])
+        with col1:
+            edit_button_label = "View Mode" if st.session_state.dataset_edit_mode else "Edit Mode"
+            if st.button(edit_button_label, key="dataset_edit_toggle"):
+                st.session_state.dataset_edit_mode = not st.session_state.dataset_edit_mode
+                st.rerun()
+        
+        # Show hint message below button
+        if not st.session_state.dataset_edit_mode:
+            st.markdown("<p style='color:#888; font-size:0.9em; margin-top:-10px;'>💡 Click \"Edit Mode\" to modify the prompt</p>", unsafe_allow_html=True)
+        
+        # Display prompt based on mode
+        if st.session_state.dataset_edit_mode:
+            st.session_state.edited_prompt = st.text_area(
+                "Edit Prompt",
+                value=st.session_state.edited_prompt,
+                height=200,
+                key="dataset_prompt_editor",
+                label_visibility="collapsed"
+            )
+            content = st.session_state.edited_prompt  # Use edited content for generation
+        else:
+            st.code(content, language="python")
         # Generate button, small and left-aligned
         colA, colB = st.columns([0.2, 0.8])
         with colA:
@@ -479,12 +516,19 @@ class App:
                 st.session_state.prompt_count += 1
                 st.session_state.last_generated_code = text
                 st.session_state.active_prompt = f"Dataset: {selected}"
+                
+                # Check if prompt was edited
+                original_content = mp[selected]["content"]
+                was_edited = content != original_content
+                
                 self.audit.save(
                     {
                         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
                         "workflow": "dataset_prompt",
                         "file": selected,
                         "content": content,
+                        "original_content": original_content if was_edited else None,
+                        "prompt_edited": was_edited,
                         "response": text,
                         "prompt_count": st.session_state.prompt_count,
                     }
@@ -690,7 +734,7 @@ class App:
                     'Name': g['cwe_name'],
                     'Severity': g['severity'],
                     'Occurrences': len(g['all_occurrences']),
-                    'Lines': lines_str,
+                    'Line Number': lines_str,
                     'Priority': g['priority']
                 })
             
@@ -742,7 +786,7 @@ class App:
         
         # Show status message based on remaining vulnerabilities BEFORE showing code
         if cleaned_code and final_patched_code:
-            remaining_vulns = results.get('metrics', {}).get('total_remaining', 0)
+            remaining_vulns = results.get('metrics', {}).get('total_remaining_all_occurrences', 0)
             if remaining_vulns == 0:
                 st.success("✅ Code has been successfully patched with 0 vulnerabilities remaining!")
             else:
@@ -863,6 +907,28 @@ class App:
             remaining_counts[data['cwe_id']]['count'] += 1
             remaining_counts[data['cwe_id']]['methods'].update(data['methods'])
 
+        # Collect detection methods and patch methods by CWE
+        cwe_detection_methods = {}
+        cwe_patch_methods = {}
+        for occ in all_occurrences:
+            cwe_id = _normalize_cwe(occ.get('cwe_id', 'N/A'))
+            tool = _friendly_source(occ.get('detection_method') or occ.get('source'))
+            if cwe_id != 'N/A' and tool == 'custom':
+                if cwe_id not in cwe_detection_methods:
+                    cwe_detection_methods[cwe_id] = set()
+                detection_method = occ.get('detection_method', 'custom')
+                cwe_detection_methods[cwe_id].add(detection_method)
+        
+        # Collect patch methods from patch iterations
+        for iteration in patch_iterations:
+            for change in iteration.get('changes', []):
+                cwe_id = _normalize_cwe(change.get('cwe_id', 'N/A'))
+                if cwe_id != 'N/A':
+                    if cwe_id not in cwe_patch_methods:
+                        cwe_patch_methods[cwe_id] = set()
+                    patch_method = change.get('patch_method', 'llm-based')
+                    cwe_patch_methods[cwe_id].add(patch_method)
+
         fixed_rows = []
         for cwe_id, tool_counts in cwe_tool_counts.items():
             total_occ = tool_counts['custom'] + tool_counts['bandit'] + tool_counts['semgrep']
@@ -874,7 +940,12 @@ class App:
             # Build identified text with tool counts
             tools_found = []
             if tool_counts['custom'] > 0:
-                tools_found.append(f"Custom ({tool_counts['custom']})")
+                custom_methods = cwe_detection_methods.get(cwe_id, set())
+                custom_text = f"Custom ({tool_counts['custom']})"
+                if custom_methods:
+                    methods_str = ", ".join(sorted(custom_methods))
+                    custom_text += f" [{methods_str}]"
+                tools_found.append(custom_text)
             if tool_counts['bandit'] > 0:
                 tools_found.append(f"Bandit ({tool_counts['bandit']})")
             if tool_counts['semgrep'] > 0:
@@ -923,7 +994,34 @@ class App:
         with col_fixed:
             with st.expander(f"✅ Fixed Vulnerabilities ({len(fixed_rows)})", expanded=False):
                 if fixed_rows:
-                    st.dataframe(pd.DataFrame(fixed_rows), use_container_width=True, hide_index=True)
+                    # Create detailed fixed vulnerabilities display
+                    for row in fixed_rows:
+                        cwe_id = row['CWE']
+                        occurrences = row['Occurrences']
+                        identified_by = row['Identified By']
+                        
+                        # Create a detail view for each fixed vulnerability
+                        st.markdown(f"**{cwe_id}** - {occurrences} fixed occurrence(s)")
+                        
+                        # Show identified by info
+                        st.markdown(f"*Identified by:* {identified_by}")
+                        
+                        # Extract custom detection methods if available
+                        custom_methods = cwe_detection_methods.get(cwe_id, set())
+                        if custom_methods:
+                            methods_list = sorted(list(custom_methods))
+                            methods_display = ", ".join([f"`{m}`" for m in methods_list])
+                            st.markdown(f"*Detection methods (Custom):* {methods_display}")
+                        
+                        # Show how it was fixed (rule-based or LLM-based)
+                        patch_methods = cwe_patch_methods.get(cwe_id, set())
+                        if patch_methods:
+                            patch_methods_list = sorted(list(patch_methods))
+                            patch_display = ", ".join([f"`{m}`" for m in patch_methods_list])
+                            st.markdown(f"*Fixed by:* {patch_display}")
+                        else:
+                            st.markdown(f"*Fixed by:* `llm-based`")
+                        st.markdown("---")
                 else:
                     st.success("No fixed vulnerabilities to display.")
         with col_unfixed:
@@ -1174,7 +1272,7 @@ class App:
             patching_eff = metrics.get('patching_effectiveness', {})
             tool_comp = metrics.get('tool_comparison', {})
 
-            st.markdown("#### Patch Effectiveness Summary")
+            st.markdown("#### Patch Summary")
             eff_rows = [{
                 'Sl.No': 1,
                 'Fix Rate': f"{patching_eff.get('fix_rate', 0):.1%}",
@@ -1197,16 +1295,35 @@ class App:
         
         # Export Reports
         st.markdown("### 📄 Generated Reports")
+        
+        # Add custom styling for download buttons
+        st.markdown("""
+            <style>
+            div.stDownloadButton > button {
+                background-color: #2d2d2d;
+                color: #e0e0e0;
+                border: 1px solid #444;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-weight: normal;
+            }
+            div.stDownloadButton > button:hover {
+                background-color: #3d3d3d;
+                border-color: #555;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+        
         final_reports = results.get('final_reports', {})
         
         if final_reports:
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 if final_reports.get('metrics') and os.path.exists(final_reports['metrics']):
                     with open(final_reports['metrics'], 'rb') as f:
                         st.download_button(
-                            label="📊 Download Metrics Report (HTML)",
+                            label="📊 Download Metrics Report",
                             data=f.read(),
                             file_name=os.path.basename(final_reports['metrics']),
                             mime='text/html',
@@ -1217,7 +1334,7 @@ class App:
                 if final_reports.get('html_summary') and os.path.exists(final_reports['html_summary']):
                     with open(final_reports['html_summary'], 'rb') as f:
                         st.download_button(
-                            label="📄 Download Analysis Summary (HTML)",
+                            label="📄 Download Analysis Summary",
                             data=f.read(),
                             file_name=os.path.basename(final_reports['html_summary']),
                             mime='text/html',
@@ -1228,22 +1345,18 @@ class App:
                 if final_reports.get('3way_evolution') and os.path.exists(final_reports['3way_evolution']):
                     with open(final_reports['3way_evolution'], 'rb') as f:
                         st.download_button(
-                            label="📈 Download 3-Way Tool Analysis (HTML)",
+                            label="📈 Download CWE Overlap Report",
                             data=f.read(),
                             file_name=os.path.basename(final_reports['3way_evolution']),
                             mime='text/html',
                             key='download_3way_evolution'
                         )
             
-            # Second row for iteration report
-            st.markdown("")  # spacing
-            col4, col5, col6 = st.columns(3)
-            
             with col4:
                 # Generate iteration-focused report
                 iteration_report_html = self._generate_iteration_report(results)
                 st.download_button(
-                    label="🔄 Download Iteration Report (HTML)",
+                    label="🔄 Download Patch Iteration Report",
                     data=iteration_report_html,
                     file_name=f"iteration_report_{results.get('workflow_id', 'unknown')}.html",
                     mime='text/html',
