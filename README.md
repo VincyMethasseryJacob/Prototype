@@ -1,144 +1,149 @@
-# Security Evaluation Prototype
+# LLM Code Vulnerability Analysis & Mitigation (CVAM) Prototype
 
-A prototype security-evaluation pipeline and dataset for collecting, analyzing, and comparing insecure Python code examples.
+A framework to detect, explain, patch, and validate security vulnerabilities in LLM‑generated Python code. Includes a backend analysis engine, a Streamlit UI, curated insecure samples by CWE, and tests.
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Files and Functions](#files-and-functions)
-- [Recreate the Dataset](#recreate-the-dataset)
-- [Analysis Results](#analysis-results)
+- [Project Structure](#project-structure)
+- [Setup](#setup)
+- [Quick Start](#quick-start)
 - [Streamlit App](#streamlit-app)
-- [Development Notes](#development-notes)
-- [Citation](#citation)
+- [Backend API](#backend-api)
+- [Datasets](#datasets)
+- [Testing](#testing)
+- [Reports](#reports)
+- [Notes](#notes)
 
 ## Overview
 
-This repository contains scripts, notebooks, and example code used to build a dataset of insecure Python snippets (organized by CWE), run static analyzers (for example, Bandit), and merge analyzer output with dataset metadata for evaluation and research.
+This repository provides:
+- A backend module that performs vulnerability detection (pattern/AST/similarity), explainability, automated patching, and static analysis cross‑validation (Bandit, Semgrep).
+- A Streamlit application to generate/analyze code, visualize findings, and export reports.
+- Curated insecure SecurityEval Python dataset organized by CWE for evaluation.
+- Tests and utilities to validate detection coverage and end‑to‑end workflow.
 
-## Files and Functions
+## Project Structure
 
-- `pyproject.toml` — project configuration and dependencies.
-- `README.md` — this file (project overview and usage notes).
-- `Security_PipelineDev.ipynb` — pipeline development notebook that parses dataset metadata, normalizes CWE IDs, and merges Bandit output with dataset metadata.
-- `SecurityEval-main/DatasetCreator.py` — dataset creation script. Reads prompts and insecure examples and writes `SecurityEval-main/dataset.jsonl` (one JSON object per line).
-- `SecurityEval-main/dataset.jsonl` — generated dataset (JSON Lines).
-- `SecurityEval-main/Testcases_Insecure_Code/` — insecure example code organized by CWE.
-- `Author_Insecure_Code/` — collected human-written insecure samples organized by CWE.
-- `Notebooks/DataCollection.ipynb` — helper notebook for collecting and preparing insecure code examples.
-- `SecurityEval-main/Result/` — analyzer outputs and related CSVs (e.g., Bandit scan results).
+- `backend/` — analysis engine: detection, explainability, patching, static analysis, metrics, reporting, and workflow orchestration.
+- `Streamlit app/` — UI (Streamlit) and small service helpers.
+- `Author_Insecure_Code/` — SecurityEval human‑written insecure samples by CWE (ground truth for evaluation).
+- `SecurityEval-main/Testcases_Prompt/` — SecurityEval prompts used by the UI and experiments.
+- `Notebooks/` — helper notebooks(e.g., data collection).
+- `pyproject.toml` — project dependencies and Python version.
+- `backend/requirements.txt` — backend and tool dependencies (Bandit, Semgrep, etc.).
 
-Example analyzer result files (in `SecurityEval-main/Result/`):
-- `bandit_analysis_20251104_120350.csv` — Bandit scan output (example findings: use of `exec`, shell use in `subprocess`, temp-file issues, hardcoded credentials).
-- `bandit_analysis_20251104_190136.csv` — additional Bandit scan output.
+## Setup
 
-## Recreate the Dataset
+- Python: 3.12+
+- OS: Windows supported (commands below use PowerShell)
 
-To (re)create the dataset using the provided script, run this from the repository root in PowerShell:
+Option A — use this repo’s venv (if present):
 
 ```powershell
-python SecurityEval-main/DatasetCreator.py
+# From repository root
+.\Scripts\activate
+pip install -r backend/requirements.txt
 ```
 
-The script reads prompts from `SecurityEval-main/Testcases_Prompt/` and insecure examples from `SecurityEval-main/Testcases_Insecure_Code/` and writes `SecurityEval-main/dataset.jsonl`.
+Option B — create a fresh virtual environment:
 
-## Analysis Results
+```powershell
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r backend/requirements.txt
+```
 
-Analyzer output (CSV/JSON) is stored under `SecurityEval-main/Result/`. Use these files to inspect static-analysis findings and to compare tool outputs with the dataset ground truth.
+Verify tools (recommended):
 
-## Streamlit App
+```powershell
+bandit --version
+semgrep --version
+```
 
-There is a prototype UI under the `Streamlit app/` folder. To run the Streamlit demo locally:
+## Quick Start
+
+Run the Streamlit UI:
 
 ```powershell
 streamlit run "Streamlit app/app_main.py"
 ```
 
-### Key Features
+Or run the backend programmatically:
 
-#### 1. Vulnerability Detection
-The app detects vulnerabilities in LLM-generated code using:
-- **Pattern-based detection**: Regex patterns matching known vulnerability signatures
-- **AST-based analysis**: Abstract Syntax Tree analysis for detecting:
-  - SQL Injection
-  - Command Injection
-  - Code Generation (eval/exec)
-  - Path Traversal
-  - Hardcoded Credentials
-  - Unsafe Deserialization
-  - Exception Handling Issues
+```python
+from backend.workflow import VulnerabilityAnalysisWorkflow
 
-The detector maps detected vulnerabilities to **34 CWE (Common Weakness Enumeration) categories** including:
-- CWE-020: Improper Input Validation
-- CWE-022: Path Traversal
-- CWE-078: OS Command Injection
-- CWE-089: SQL Injection
-- CWE-094/095: Code Generation/Eval
-- CWE-200/798: Hardcoded Credentials
-- CWE-502: Unsafe Deserialization
-- And 26 more...
+workflow = VulnerabilityAnalysisWorkflow(
+    vulnerable_samples_dir="Author_Insecure_Code",
+    reports_dir="reports",
+    openai_client=None,        # optional (rule-based patching if None)
+    max_patch_iterations=6
+)
 
-#### 2. Explainability Layer
-For each detected vulnerability, the system automatically generates:
-- **Plain-language explanation**: Describes why the vulnerability is a security risk
-  - Example: "SQL Injection occurs when user input is concatenated directly into SQL queries. An attacker can modify query logic, bypass authentication, extract data, or modify/delete data."
-- **Patch recommendation**: Specific fix instructions
-  - Example: "Use parameterized queries or prepared statements instead of string concatenation or formatting."
+code = """
+import os, sqlite3
+def f(user, path):
+    q = "SELECT * FROM users WHERE name='" + user + "'"
+    sqlite3.connect('db.db').cursor().execute(q)
+    open(path).read()
+    pwd = "admin123"
+"""
 
-All explanations are stored in the output report and displayed alongside the vulnerability findings.
+results = workflow.run_complete_workflow(code, prompt="demo")
+print(results["status"], results["vulnerability_count"])
+```
 
-#### 3. Vulnerability Reporting
-Comprehensive reporting with multiple export formats:
+Optional: LLM-based patching in the app can use the OpenAI API key. The UI provides a input field to enter it; no environment variable is required.
 
-**Display Features:**
-- **Summary Table**: Shows CWE ID, description, priority, severity, and line number
-- **Detailed Findings**: Severity-colored visualization with expandable details for each vulnerability
-- **No Vulnerabilities**: Clear "No vulnerabilities detected" message when code is secure
+## Streamlit App
 
-**Export Formats:**
-- **CSV Export**: Tabular format with all vulnerability details and explanations
-- **JSON Export**: Structured data for programmatic analysis
-- Both formats include:
-  - CWE ID and Name
-  - Severity Level (Critical, High, Medium, Low)
-  - Priority Score
-  - Line Number
-  - Matched Code
-  - Plain-language Explanation
-  - Patch Recommendation
+Launch:
 
-**Report Statistics:**
-- Total vulnerability count
-- Count by severity level
-- Unique CWE categories found
-- Timestamp and metadata
+```powershell
+streamlit run "Streamlit app/app_main.py"
+```
 
-### Workflow
+Features:
+- Vulnerability detection using pattern and AST analysis across 30+ CWE categories.
+- Explainability: plain‑language descriptions and patch recommendations.
+- Reporting: summary + detailed findings, CSV/JSON export, basic stats.
+- Integrates backend workflow for iterative patching and validation.
 
-1. **Input Generation**:
-   - Enter a custom prompt or select from the SecurityEval dataset
-   - App generates Python code using OpenAI API
+Relevant UI services:
+- `services/audit_manager.py` — audit record helpers.
+- `services/cwe_fetcher.py` — CWE label utilities.
+- `services/openai_client_wrapper.py` — OpenAI client wrapper.
+- `services/security_eval_loader.py` — loads prompt/examples from SecurityEval.
 
-2. **Vulnerability Analysis**:
-   - Generated code is automatically scanned for security issues
-   - Multiple detection methods analyze the code
+## Backend API
 
-3. **Results Display**:
-   - Summary statistics shown immediately
-   - Detailed table with all findings
-   - Expandable sections for each vulnerability with full context
+See the detailed module guide in backend/README.md. Key modules:
+- `workflow.py` — orchestrates preprocessing → detection → explanations → patching → multi‑tool analysis → metrics → reports.
+- `vuln_detection.py` — vulnerability detector (patterns, AST, similarity).
+- `explainability.py` — explanation and patch‑note generation.
+- `patching.py` — automated rule‑based patching.
+- `static_analysis.py` — Bandit and Semgrep integration + comparisons.
+- `metrics.py` — precision/recall/F1 and workflow metrics.
+- `reporting.py` — CSV/JSON/HTML report generation.
+- `preprocessing.py` — code cleanup/normalization.
 
-4. **Export & Download**:
-   - Download reports in JSON or CSV format
-   - Store for further analysis or compliance documentation
+Install backend requirements:
 
-### New Modules
+```powershell
+pip install -r backend/requirements.txt
+```
 
-- **`VulnerabilityDetector`** (`services/vulnerability_detector.py`): Detects vulnerabilities using pattern and AST-based analysis
-- **`ExplainabilityGenerator`** (`services/explainability_generator.py`): Generates explanations and patch recommendations
-- **`VulnerabilityReporter`** (`services/vulnerability_reporter.py`): Generates and exports reports in multiple formats
+## Datasets
 
-## Development Notes
+- `Author_Insecure_Code/` — curated insecure Python files grouped by CWE (used for evaluation and similarity).
+- `SecurityEval-main/Testcases_Prompt/` — example prompts/testcases referenced by the UI.
 
-- Notebook `Security_PipelineDev.ipynb` contains utilities for normalizing CWE IDs (zero-padding to three digits) and merging Bandit results with dataset metadata.
-- The repository contains two collections of insecure examples: `Author_Insecure_Code/` (human-collected) and `SecurityEval-main/Testcases_Insecure_Code/` (dataset examples).
+## Reports
+
+- Streamlit exports: CSV/JSON under `Streamlit app/reports/`.
+- Backend workflow reports: under `reports/` (configurable in `VulnerabilityAnalysisWorkflow`).
+
+## Notes
+
+- Python only at present; static analysis relies on Bandit and Semgrep.
