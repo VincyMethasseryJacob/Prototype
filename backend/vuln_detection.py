@@ -104,8 +104,9 @@ class VulnerabilityDetector:
         
         cwe_names = {
             '020': 'Improper Input Validation',
-            '022': 'Path Traversal',
+            '022': 'Path Traversal',           
             '078': 'OS Command Injection',
+            '079': 'Cross-Site Scripting (XSS)',
             '080': 'Improper Neutralization of Script-Related HTML Tags (Basic XSS)',
             '089': 'SQL Injection',
             '094': 'Code Injection',
@@ -138,6 +139,7 @@ class VulnerabilityDetector:
             '614': 'Sensitive Cookie in HTTPS Session',
             '693': 'Missing Security Header',
             '703': 'Improper Check',
+            '706': 'Use of Incorrectly-Resolved Name or Reference',
             '730': 'Regex DoS',
             '732': 'Incorrect Permission',
             '798': 'Hard-coded Credentials',

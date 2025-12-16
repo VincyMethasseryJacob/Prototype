@@ -1255,10 +1255,20 @@ Provide ONLY the fixed code without explanations. Maintain all functionality whi
 """
             
             response = self.openai_client.generate_code_only_response(prompt, max_tokens=2000)
+            # Sanitize LLM response: strip Markdown code fences if present
+            patched = response.strip()
+            if patched.startswith("```"):
+                # Remove leading fence
+                first_newline = patched.find("\n")
+                patched = patched[first_newline + 1:] if first_newline != -1 else patched
+            if patched.endswith("```"):
+                # Remove trailing fence
+                patched = patched[:-3]
+            patched = patched.strip()
             
             return {
                 'success': True,
-                'patched_code': response,
+                'patched_code': patched,
                 'description': f'LLM-generated patch for CWE-{vuln.get("cwe_id")}'
             }
         except Exception as e:

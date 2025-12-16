@@ -67,16 +67,27 @@ class VulnerabilityAnalysisWorkflow:
         self,
         generated_code: str,
         prompt: str = "",
-        workflow_id: str = None
+        workflow_id: str = None,
+        output_dir: str = None
     ) -> Dict:
         """
         Execute the complete vulnerability analysis workflow.
+        
+        Args:
+            generated_code: The code to analyze
+            prompt: Optional prompt that generated the code
+            workflow_id: Optional custom workflow ID
+            output_dir: Optional custom output directory for reports (e.g., session folder)
         
         Returns:
             Dict containing all results from each workflow step
         """
         if not workflow_id:
             workflow_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Set custom output directory if provided
+        if output_dir:
+            self.reporter.set_output_dir(output_dir)
         
         results = {
             'workflow_id': workflow_id,
@@ -742,6 +753,10 @@ class VulnerabilityAnalysisWorkflow:
             results['status'] = 'partially_patched'
             results['show_patch_info_message'] = True
             print(f"\n  Workflow completed - {len(total_remaining_vulns)} vulnerabilities remain")
+        
+        # Reset output directory if it was temporarily changed
+        self.reporter.reset_output_dir()
+        
         return results
     
     def _step_preprocessing(self, code: str) -> str:
@@ -979,15 +994,10 @@ class VulnerabilityAnalysisWorkflow:
         if 'all_3way_comparisons' in results:
             reports['3way_evolution'] = self.reporter.export_3way_overlap_evolution_report(
                 results,
-                output_dir="test_reports"
+                workflow_id=workflow_id
             )
             
-            # Also generate detailed overlap report for final comparison
-            if 'final_3way_comparison' in results:
-                reports['overlap_details'] = self.reporter.export_overlap_details_report(
-                    results['final_3way_comparison'],
-                    output_dir="test_reports"
-                )
+            # Removed unused detailed overlap HTML report generation
         
         # HTML summary
         if 'vulnerabilities_with_explanations' in results:
@@ -996,7 +1006,8 @@ class VulnerabilityAnalysisWorkflow:
                 reports.get('patch_report', {}),
                 results.get('metrics', {}),
                 results.get('original_code', ''),
-                results.get('final_patched_code', '')
+                results.get('final_patched_code', ''),
+                workflow_id=workflow_id
             )
         
         return reports

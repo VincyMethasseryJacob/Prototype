@@ -34,7 +34,14 @@ class OpenAIClientWrapper:
         Detect if the user intends to generate Python code.
         If not, the system should refuse the request.
         """
-        keywords = ["code", "python", "function", "class", "refactor", "fix", "patch"]
+        keywords = [
+            "code", "python", "function", "class", "refactor", "fix", "patch",
+            "debug", "bug", "error", "exception", "implement", "create", "write",
+            "generate", "algorithm", "method", "variable", "optimize", "improve",
+            "enhance", "test", "unit test", "script", "module", "library",
+            "syntax", "logic", "snippet", "rewrite", "decorator", "exception handler",
+            "loop", "conditional", "import", "define", "initialize", "request", "yaml"
+        ]
         prompt_lower = prompt.lower()
         return any(k in prompt_lower for k in keywords)
 

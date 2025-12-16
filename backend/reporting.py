@@ -15,7 +15,27 @@ class VulnerabilityReporter:
     
     def __init__(self, output_dir: str = "reports"):
         self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
+        self._original_output_dir = output_dir
+        # Directory will be created lazily when files are actually saved
+    
+    def _ensure_output_dir(self) -> None:
+        """Create output directory if it doesn't exist (lazy initialization)."""
+        os.makedirs(self.output_dir, exist_ok=True)
+    
+    def set_output_dir(self, output_dir: str) -> None:
+        """
+        Temporarily set the output directory for report generation.
+        Useful for organizing reports by session folder.
+        
+        Args:
+            output_dir: Path to the output directory for reports
+        """
+        self.output_dir = output_dir
+        # Directory will be created lazily when files are actually saved
+    
+    def reset_output_dir(self) -> None:
+        """Reset output directory to the original one."""
+        self.output_dir = self._original_output_dir
     
     def export_vulnerability_report(
         self,
@@ -34,6 +54,9 @@ class VulnerabilityReporter:
                 'json_path': None,
                 'message': 'No vulnerabilities to report'
             }
+        
+        # Ensure output directory exists before writing files
+        self._ensure_output_dir()
         
         # Generate filename with timestamp if not provided
         if not filename_base:
@@ -97,6 +120,9 @@ class VulnerabilityReporter:
         """
         Export patch information including before/after code and changes.
         """
+        # Ensure output directory exists before writing files
+        self._ensure_output_dir()
+        
         if not filename_base:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename_base = f"patch_report_{timestamp}"
@@ -147,6 +173,9 @@ class VulnerabilityReporter:
         Returns:
             Dict with paths to saved iteration code files
         """
+        # Ensure output directory exists before writing files
+        self._ensure_output_dir()
+        
         if not filename_base:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename_base = f"patch_iterations_{timestamp}"
@@ -191,6 +220,9 @@ class VulnerabilityReporter:
         """
         Export static analysis results from multiple tools.
         """
+        # Ensure output directory exists before writing files
+        self._ensure_output_dir()
+        
         if not filename_base:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename_base = f"static_analysis_{timestamp}"
@@ -225,6 +257,9 @@ class VulnerabilityReporter:
         """
         Export comprehensive metrics report as HTML with visual charts.
         """
+        # Ensure output directory exists before writing files
+        self._ensure_output_dir()
+        
         if not filename_base:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename_base = f"metrics_report_{timestamp}"
@@ -490,12 +525,23 @@ class VulnerabilityReporter:
         patch_info: Dict,
         metrics: Dict,
         original_code: str = "",
-        patched_code: str = ""
+        patched_code: str = "",
+        workflow_id: str = None
     ) -> str:
         """
         Generate an HTML summary report with custom executive summary and detected vulnerabilities table as per requirements.
+        
+        Args:
+            workflow_id: Optional workflow ID to use in the filename for consistency
         """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Ensure output directory exists before writing files
+        self._ensure_output_dir()
+        
+        # Use workflow_id if provided, otherwise generate new timestamp
+        if workflow_id:
+            timestamp = workflow_id
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         html_path = os.path.join(self.output_dir, f"summary_report_{timestamp}.html")
 
         # Gather tool counts for initial and iteration (from metrics)
@@ -679,22 +725,31 @@ class VulnerabilityReporter:
         
         return ''.join(cards)
     
-    def export_3way_overlap_evolution_report(self, results: Dict, output_dir: str = "test_reports") -> str:
+    def export_3way_overlap_evolution_report(self, results: Dict, output_dir: str = None, workflow_id: str = None) -> str:
         """
         Generate comprehensive HTML report showing 3-way tool agreement evolution across phases.
         
         Args:
             results: Complete workflow results with all_3way_comparisons
-            output_dir: Directory to save the report
+            output_dir: Optional directory to save the report (uses self.output_dir if not provided)
+            workflow_id: Optional workflow ID to use in the filename
             
         Returns:
             Path to generated report file
         """
         import datetime
         
-        os.makedirs(output_dir, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = os.path.join(output_dir, f"3way_overlap_evolution_{timestamp}.html")
+        # Use provided output_dir or fall back to self.output_dir
+        target_dir = output_dir or self.output_dir
+        # Ensure output directory exists before writing files
+        os.makedirs(target_dir, exist_ok=True)
+        
+        # Use workflow_id if provided, otherwise generate new timestamp
+        if workflow_id:
+            filename_base = workflow_id
+        else:
+            filename_base = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(target_dir, f"3way_overlap_evolution_{filename_base}.html")
         
         # Extract 3-way comparison data
         all_comparisons = results.get('all_3way_comparisons', {})
@@ -1143,22 +1198,30 @@ class VulnerabilityReporter:
         print(f"✅ 3-way overlap evolution report saved: {filename}")
         return filename
     
-    def export_overlap_details_report(self, comparison_result: Dict, output_dir: str = "test_reports") -> str:
+    def export_overlap_details_report(self, comparison_result: Dict, output_dir: str = None, workflow_id: str = None) -> str:
         """
         Generate detailed report showing which CWEs overlap at which line numbers.
         
         Args:
             comparison_result: Result from compare_three_tools method
-            output_dir: Directory to save the report
+            output_dir: Optional directory to save the report (uses self.output_dir if not provided)
+            workflow_id: Optional workflow ID to use in the filename
             
         Returns:
             Path to generated report file
         """
         import datetime
         
-        os.makedirs(output_dir, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = os.path.join(output_dir, f"overlap_details_{timestamp}.html")
+        # Use provided output_dir or fall back to self.output_dir
+        target_dir = output_dir or self.output_dir
+        os.makedirs(target_dir, exist_ok=True)
+        
+        # Use workflow_id if provided, otherwise generate new timestamp
+        if workflow_id:
+            filename_base = workflow_id
+        else:
+            filename_base = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(target_dir, f"overlap_details_{filename_base}.html")
         
         # Extract details
         custom_bandit_details = comparison_result.get('custom_bandit_overlap_details', [])
@@ -1184,62 +1247,7 @@ class VulnerabilityReporter:
             margin: 0 auto;
             background-color: white;
             padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #2c3e50;
-            border-bottom: 3px solid #3498db;
-            padding-bottom: 10px;
-        }
-        h2 {
-            color: #34495e;
-            margin-top: 30px;
-        }
-        .overlap-section {
-            margin: 30px 0;
-            padding: 20px;
-            border-left: 5px solid #3498db;
-            background-color: #f8f9fa;
-        }
-        .overlap-section.three-way {
-            border-left-color: #1abc9c;
-        }
-        .overlap-section.custom-bandit {
-            border-left-color: #3498db;
-        }
-        .overlap-section.custom-semgrep {
-            border-left-color: #9b59b6;
-        }
-        .overlap-section.bandit-semgrep {
-            border-left-color: #e74c3c;
-        }
-        .details-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 15px 0;
-        }
-        .details-table th, .details-table td {
-            border: 1px solid #ddd;
-            padding: 12px;
-            text-align: left;
-        }
-        .details-table th {
-            background-color: #34495e;
-            color: white;
-            font-weight: bold;
-        }
-        .details-table tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        .cwe-badge {
-            display: inline-block;
-            background-color: #e74c3c;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-weight: bold;
-            margin-right: 10px;
+            # Removed: export_overlap_details_report (previously generated overlap_details_*.html)
         }
         .line-badge {
             display: inline-block;

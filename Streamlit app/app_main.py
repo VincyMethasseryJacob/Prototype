@@ -99,6 +99,7 @@ def get_cwe_name(cwe_id: str) -> str:
         cwe_id_str = cwe_id_str.zfill(3)
     
     cwe_names = {
+        '079': 'Cross-Site Scripting (XSS)',
         '020': 'Improper Input Validation',
         '022': 'Path Traversal',
         '078': 'OS Command Injection',
@@ -136,6 +137,7 @@ def get_cwe_name(cwe_id: str) -> str:
         '614': 'Sensitive Cookie in HTTPS Session',
         '693': 'Missing Security Header',
         '703': 'Improper Check',
+        '706': 'Use of Incorrectly-Resolved Name or Reference',
         '730': 'Regex DoS',
         '732': 'Incorrect Permission',
         '798': 'Hard-coded Credentials',
@@ -216,7 +218,7 @@ class App:
 
         self.loader = SecurityEvalLoader()
         self.cwe = CWEFetcher()
-        self.audit = AuditManager(AUDIT_DIR)
+        self.audit = AuditManager(AUDIT_DIR, session_state=st.session_state)
         self.client_wrapper = None
         self.workflow = None
 
@@ -248,6 +250,7 @@ class App:
             "manual_prompt_text": "",
             "last_generated_code": "",
             "last_workflow_result": None,
+            "audit_session_folder": None,
             "show_analysis_view": False,
             "analysis_ready": False,
         }
@@ -355,6 +358,313 @@ class App:
                 st.markdown(get_section_header("Example Prompts"), unsafe_allow_html=True)
                 st.markdown(get_example_prompts(), unsafe_allow_html=True)
 
+    # -------------------- HELPER METHODS --------------------
+    def _extract_vulnerability_tracking_data(self, workflow_result: dict) -> dict:
+        """
+        Extract comprehensive vulnerability tracking data from workflow results.
+        
+        Returns:
+            dict: Comprehensive vulnerability tracking information
+        """
+        metrics = workflow_result.get('metrics', {}) or {}
+        
+        # Initial vulnerabilities by tool
+        initial_custom = workflow_result.get('initial_custom_count', 0)
+        initial_bandit = workflow_result.get('initial_bandit_count', 0)
+        initial_semgrep = workflow_result.get('initial_semgrep_count', 0)
+        
+        # Iteration vulnerabilities by tool
+        iteration_custom = metrics.get('iteration_custom_count', 0)
+        iteration_bandit = metrics.get('iteration_bandit_count', 0)
+        iteration_semgrep = metrics.get('iteration_semgrep_count', 0)
+        
+        # Total by tool
+        custom_total = metrics.get('custom_detector_total_all_occurrences', initial_custom)
+        bandit_total = metrics.get('bandit_total_all_occurrences', initial_bandit)
+        semgrep_total = metrics.get('semgrep_total_all_occurrences', initial_semgrep)
+        
+        # Fixed and remaining
+        total_fixed = metrics.get('total_fixed', 0)
+        total_remaining = metrics.get('total_remaining_all_occurrences', 0)
+        
+        # CWE breakdown
+        unique_cwe_ids = metrics.get('unique_cwe_ids', [])
+        remaining_cwe_ids = metrics.get('remaining_cwe_ids', [])
+        fixed_cwe_ids = sorted(list(set(unique_cwe_ids) - set(remaining_cwe_ids)))
+        
+        # Get detailed vulnerability lists
+        all_found_vulns = metrics.get('all_found_vulns_occurrences', [])
+
+        # Get initial vulnerabilities separately (from workflow_result, not metrics)
+        initial_vulns_custom = workflow_result.get('vulnerabilities_detected', [])
+        initial_vulns_bandit = workflow_result.get('bandit_original', {}).get('issues', [])
+        initial_vulns_semgrep = workflow_result.get('semgrep_original', {}).get('issues', [])
+
+        # Convert Bandit and Semgrep to vulnerability format for initial run
+        from backend.workflow import VulnerabilityAnalysisWorkflow
+        temp_workflow = VulnerabilityAnalysisWorkflow(
+            vulnerable_samples_dir='',
+            reports_dir=''
+        )
+        initial_bandit_converted = temp_workflow._convert_bandit_to_vulns(
+            initial_vulns_bandit,
+            workflow_result.get('cleaned_code', '')
+        )
+        initial_semgrep_converted = temp_workflow._convert_semgrep_to_vulns(
+            initial_vulns_semgrep,
+            workflow_result.get('cleaned_code', '')
+        )
+
+        # Get iteration-specific vulnerabilities
+        patch_iterations = workflow_result.get('patch_iterations', [])
+        iteration_vulns_custom = []
+        iteration_vulns_bandit = []
+        iteration_vulns_semgrep = []
+
+        for iteration in patch_iterations:
+            # Custom detector vulnerabilities in this iteration
+            custom_vulns_dict = iteration.get('custom_detector_vulns', {})
+            for cwe_key, vuln_data in custom_vulns_dict.items():
+                for line in vuln_data.get('lines', []):
+                    iteration_vulns_custom.append({
+                        'cwe_id': vuln_data.get('cwe_id'),
+                        'cwe_name': vuln_data.get('cwe_name'),
+                        'line': line,
+                        'iteration': iteration.get('iteration_number', 0)
+                    })
+
+            # Bandit vulnerabilities in this iteration
+            bandit_analysis = iteration.get('bandit_analysis', {})
+            if bandit_analysis.get('issues'):
+                iteration_vulns_bandit.extend(temp_workflow._convert_bandit_to_vulns(
+                    bandit_analysis.get('issues', []),
+                    iteration.get('patched_code', '')
+                ))
+
+            # Semgrep vulnerabilities in this iteration
+            semgrep_analysis = iteration.get('semgrep_analysis', {})
+            if semgrep_analysis.get('issues'):
+                iteration_vulns_semgrep.extend(temp_workflow._convert_semgrep_to_vulns(
+                    semgrep_analysis.get('issues', []),
+                    iteration.get('patched_code', '')
+                ))
+
+        # Organize vulnerabilities by CWE and tool
+        vulnerabilities_by_cwe = {}
+        for vuln in all_found_vulns:
+            cwe_id = vuln.get('cwe_id', 'Unknown')
+            if cwe_id not in vulnerabilities_by_cwe:
+                vulnerabilities_by_cwe[cwe_id] = {
+                    'cwe_name': vuln.get('cwe_name', 'Unknown'),
+                    'custom_detector': [],
+                    'bandit': [],
+                    'semgrep': []
+                }
+            
+            tool = vuln.get('detection_method', vuln.get('source', 'custom'))
+            line = vuln.get('line', vuln.get('line_number', 'Unknown'))
+            severity = vuln.get('severity', 'MEDIUM')
+            
+            vuln_info = {
+                'line': line,
+                'severity': severity,
+                'description': vuln.get('description', ''),
+                'explanation': vuln.get('explanation', '')
+            }
+            
+            if tool == 'bandit':
+                vulnerabilities_by_cwe[cwe_id]['bandit'].append(vuln_info)
+            elif tool == 'semgrep':
+                vulnerabilities_by_cwe[cwe_id]['semgrep'].append(vuln_info)
+            else:
+                vulnerabilities_by_cwe[cwe_id]['custom_detector'].append(vuln_info)
+        
+        # Extract fix techniques for all vulnerabilities (initial + iterations)
+        vulnerability_fixes = []
+        
+        # Initial patch fixes
+        initial_patch = workflow_result.get('initial_patch_result', {})
+        if initial_patch:
+            changes = initial_patch.get('changes', [])
+            for change in changes:
+                # Extract actual detection and patch methods from the change data
+                detection_method = change.get('detection_method', 'custom')
+                patch_method = change.get('patch_method', 'rule-based')
+                
+                vulnerability_fixes.append({
+                    'phase': 'initial_patch',
+                    'iteration': 0,
+                    'cwe_id': change.get('cwe_id', 'Unknown'),
+                    'cwe_name': change.get('cwe_name', 'Unknown'),
+                    'detection_method': detection_method,
+                    'detection_technique': self._get_detection_technique_description(detection_method),
+                    'line_number': change.get('line_number', 'Unknown'),
+                    'fix_technique': patch_method,
+                    'fix_description': change.get('change_description', change.get('description', '')),
+                    'original_code': change.get('original_line', ''),
+                    'patched_code': change.get('patched_line', '')
+                })
+        
+        # Iteration-based fixes
+        patch_iterations = workflow_result.get('patch_iterations', [])
+        for iteration in patch_iterations:
+            iteration_num = iteration.get('iteration_number', 0)
+            changes = iteration.get('changes', [])
+            
+            for change in changes:
+                # Extract actual detection and patch methods from the change data
+                detection_method = change.get('detection_method', change.get('source', 'custom'))
+                patch_method = change.get('patch_method', 'rule-based')
+                
+                vulnerability_fixes.append({
+                    'phase': 'iterative_repair',
+                    'iteration': iteration_num,
+                    'cwe_id': change.get('cwe_id', 'Unknown'),
+                    'cwe_name': change.get('cwe_name', 'Unknown'),
+                    'detection_method': detection_method,
+                    'detection_technique': self._get_detection_technique_description(detection_method),
+                    'line_number': change.get('line_number', 'Unknown'),
+                    'fix_technique': patch_method,
+                    'fix_description': change.get('change_description', change.get('description', '')),
+                    'original_code': change.get('original_line', ''),
+                    'patched_code': change.get('patched_line', '')
+                })
+            
+            # Also capture custom detector specific information from iterations
+            custom_vulns = iteration.get('custom_detector_vulns', {})
+            for cwe_key, vuln_data in custom_vulns.items():
+                # Check if we haven't already captured this from changes
+                cwe_id = vuln_data.get('cwe_id')
+                if not any(f['cwe_id'] == cwe_id and f['iteration'] == iteration_num for f in vulnerability_fixes):
+                    vulnerability_fixes.append({
+                        'phase': 'iterative_repair',
+                        'iteration': iteration_num,
+                        'cwe_id': cwe_id,
+                        'cwe_name': vuln_data.get('cwe_name', 'Unknown'),
+                        'detection_method': 'custom_detector',
+                        'detection_technique': 'Multiple AST-based techniques',
+                        'lines_fixed': vuln_data.get('lines', []),
+                        'fix_technique': 'rule-based or llm-based',
+                        'fix_description': vuln_data.get('explanations', [])
+                    })
+        
+        # Count fix techniques used
+        fix_technique_counts = {}
+        detection_technique_counts = {}
+        cwe_fix_technique_map = {}
+        for fix in vulnerability_fixes:
+            fix_tech = fix.get('fix_technique', 'unknown')
+            det_method = fix.get('detection_method', 'unknown')
+            cwe_id = str(fix.get('cwe_id', ''))
+            fix_technique_counts[fix_tech] = fix_technique_counts.get(fix_tech, 0) + 1
+            detection_technique_counts[det_method] = detection_technique_counts.get(det_method, 0) + 1
+            if cwe_id:
+                cwe_fix_technique_map[cwe_id] = fix_tech
+
+        result = {
+            'total_vulnerabilities_identified': custom_total + bandit_total + semgrep_total,
+            'total_vulnerabilities_fixed': total_fixed,
+            'total_vulnerabilities_remaining': total_remaining,
+            'fixed_cwe_ids': fixed_cwe_ids,
+            'non_fixed_cwe_ids': remaining_cwe_ids,
+            'initial_run_by_tool': {
+                'custom_detector': {
+                    'count': initial_custom,
+                    'identified_vulnerabilities': [
+                        {
+                            'cwe_id': v.get('cwe_id'),
+                            'cwe_name': v.get('cwe_name'),
+                            'line': v.get('line_number', v.get('line')),
+                            'severity': v.get('severity'),
+                            'description': v.get('description'),
+                            'detection_method': v.get('detection_method', 'custom')
+                        } for v in initial_vulns_custom
+                    ]
+                },
+                'bandit': {
+                    'count': initial_bandit,
+                    'identified_vulnerabilities': [
+                        {
+                            'cwe_id': v.get('cwe_id'),
+                            'cwe_name': v.get('cwe_name'),
+                            'line': v.get('line', v.get('line_number')),
+                            'severity': v.get('severity'),
+                            'description': v.get('description'),
+                            'test_id': initial_vulns_bandit[i].get('test_id') if i < len(initial_vulns_bandit) else None
+                        } for i, v in enumerate(initial_bandit_converted)
+                    ]
+                },
+                'semgrep': {
+                    'count': initial_semgrep,
+                    'identified_vulnerabilities': [
+                        {
+                            'cwe_id': v.get('cwe_id'),
+                            'cwe_name': v.get('cwe_name'),
+                            'line': v.get('line', v.get('line_number')),
+                            'severity': v.get('severity'),
+                            'description': v.get('description'),
+                            'check_id': initial_vulns_semgrep[i].get('check_id') if i < len(initial_vulns_semgrep) else None
+                        } for i, v in enumerate(initial_semgrep_converted)
+                    ]
+                }
+            },
+            'iterations_by_tool': {
+                'custom_detector': {
+                    'count': iteration_custom,
+                    'total_across_all_iterations': custom_total,
+                    'identified_vulnerabilities': iteration_vulns_custom
+                },
+                'bandit': {
+                    'count': iteration_bandit,
+                    'total_across_all_iterations': bandit_total,
+                    'identified_vulnerabilities': [
+                        {
+                            'cwe_id': v.get('cwe_id'),
+                            'cwe_name': v.get('cwe_name'),
+                            'line': v.get('line', v.get('line_number')),
+                            'severity': v.get('severity'),
+                            'description': v.get('description')
+                        } for v in iteration_vulns_bandit
+                    ]
+                },
+                'semgrep': {
+                    'count': iteration_semgrep,
+                    'total_across_all_iterations': semgrep_total,
+                    'identified_vulnerabilities': [
+                        {
+                            'cwe_id': v.get('cwe_id'),
+                            'cwe_name': v.get('cwe_name'),
+                            'line': v.get('line', v.get('line_number')),
+                            'severity': v.get('severity'),
+                            'description': v.get('description')
+                        } for v in iteration_vulns_semgrep
+                    ]
+                }
+            },
+            'fix_technique_summary': cwe_fix_technique_map,
+            'detection_technique_summary': detection_technique_counts
+        }
+        # vulnerabilities_by_cwe and vulnerability_fixes fields are not included in the audit output
+        return result
+    
+    def _get_detection_technique_description(self, detection_method: str) -> str:
+        """Get human-readable description of detection technique."""
+        descriptions = {
+            'ast-param': 'AST parameter tracking',
+            'ast-framework': 'AST framework analysis',
+            'ast-taint': 'AST taint analysis',
+            'ast-except': 'AST exception handling',
+            'ast-config': 'AST configuration check',
+            'ast-interprocedural': 'AST interprocedural analysis',
+            'semantic-pattern': 'Semantic pattern matching',
+            'similarity+AST': 'Similarity + AST hybrid',
+            'ast': 'General AST analysis',
+            'bandit': 'Bandit static analyzer',
+            'semgrep': 'Semgrep pattern matcher',
+            'custom': 'Custom detection rule'
+        }
+        return descriptions.get(detection_method, f'{detection_method} analysis')
+
     # -------------------- NEW PROMPT UI --------------------
     def _ui_new_prompt(self, wide=False):
         prompt = st.text_area(
@@ -376,6 +686,8 @@ class App:
                 st.markdown("<style>div.stAlert{max-width:fit-content !important;}</style>", unsafe_allow_html=True)
                 st.warning("Prompt cannot be empty.")
             else:
+                # Create a fresh session folder for this new prompt execution
+                self.audit.set_session_folder(force_new=True, workflow_type="manual_prompt")
                 with st.spinner("Generating code from LLM..."):
                     generated_code = self.client_wrapper.generate_code_only_response(
                         prompt_text, max_tokens=MAX_RESPONSE_TOKENS
@@ -392,8 +704,18 @@ class App:
         if st.session_state.get("last_generated_code"):
             # Smaller left-aligned analyze button
             colAnalyze, _ = st.columns([0.25, 0.75])
+            # Disable analyze if LLM returned non-code restriction message
+            restricted_msg = "This LLM is restricted to generating Python code only. Your request does not appear to be code-related."
+            last_code = (st.session_state.get("last_generated_code") or "").strip()
+            is_restricted = last_code == restricted_msg
             with colAnalyze:
-                analyze_clicked = st.button("Analyze Vulnerabilities", key="manual_analyze_btn")
+                analyze_clicked = st.button(
+                    "Analyze Vulnerabilities",
+                    key="manual_analyze_btn",
+                    disabled=is_restricted
+                )
+            if is_restricted:
+                st.info("Analysis disabled: LLM did not return code.")
             
             if analyze_clicked:
                 if not st.session_state.get("last_generated_code"):
@@ -401,21 +723,96 @@ class App:
                     st.warning("Generate code before analyzing.")
                 else:
                     with st.spinner("Running vulnerability analysis..."):
+                        # Reuse the session folder created during Generate
+                        session_folder = self.audit.get_session_folder()
                         workflow_result = self.workflow.run_complete_workflow(
                             st.session_state.last_generated_code,
-                            prompt=st.session_state.get("active_prompt", "")
+                            prompt=st.session_state.get("active_prompt", ""),
+                            output_dir=session_folder
                         )
                         st.session_state.last_workflow_result = workflow_result
+                    # Compute total vulnerabilities across original and all iterations by all tools
+                    metrics_obj = workflow_result.get('metrics', {}) or {}
+                    total_vulns = (
+                        metrics_obj.get('total_detected_all_occurrences')
+                        or workflow_result.get('total_vulns_found_all_occurrences')
+                        or len(workflow_result.get('all_found_vulns_total', [])
+                               or workflow_result.get('all_found_vulns_occurrences', [])
+                               or workflow_result.get('all_found_vulns_initial', []))
+                    )
+                    # Fallback to initial-only sum if aggregates not present
+                    if not isinstance(total_vulns, int):
+                        custom_count = workflow_result.get('vulnerability_count', 0)
+                        bandit_count = len(workflow_result.get('bandit_original', {}).get('issues', []))
+                        semgrep_count = len(workflow_result.get('semgrep_original', {}).get('issues', []))
+                        total_vulns = custom_count + bandit_count + semgrep_count
+
+                    # Extract comprehensive vulnerability tracking data
+                    vuln_tracking = self._extract_vulnerability_tracking_data(workflow_result)
+                    
+                    # Calculate CWE overlaps for initial, iteration, and total
+                    def get_cwe_sets(tool_vulns):
+                        return set(v['cwe_id'] for v in tool_vulns if v.get('cwe_id'))
+
+                    initial = vuln_tracking.get('initial_run_by_tool', {})
+                    iter_ = vuln_tracking.get('iterations_by_tool', {})
+
+                    # Initial phase sets
+                    cwe_custom_init = get_cwe_sets(initial.get('custom_detector', {}).get('identified_vulnerabilities', []))
+                    cwe_bandit_init = get_cwe_sets(initial.get('bandit', {}).get('identified_vulnerabilities', []))
+                    cwe_semgrep_init = get_cwe_sets(initial.get('semgrep', {}).get('identified_vulnerabilities', []))
+
+                    # Iteration phase sets
+                    cwe_custom_iter = get_cwe_sets(iter_.get('custom_detector', {}).get('identified_vulnerabilities', []))
+                    cwe_bandit_iter = get_cwe_sets(iter_.get('bandit', {}).get('identified_vulnerabilities', []))
+                    cwe_semgrep_iter = get_cwe_sets(iter_.get('semgrep', {}).get('identified_vulnerabilities', []))
+
+                    # Pairwise and triple overlaps (initial)
+                    overlap_init_custom_bandit = sorted(cwe_custom_init & cwe_bandit_init)
+                    overlap_init_custom_semgrep = sorted(cwe_custom_init & cwe_semgrep_init)
+                    overlap_init_bandit_semgrep = sorted(cwe_bandit_init & cwe_semgrep_init)
+                    overlap_init_all = sorted(cwe_custom_init & cwe_bandit_init & cwe_semgrep_init)
+
+                    # Pairwise and triple overlaps (iteration)
+                    overlap_iter_custom_bandit = sorted(cwe_custom_iter & cwe_bandit_iter)
+                    overlap_iter_custom_semgrep = sorted(cwe_custom_iter & cwe_semgrep_iter)
+                    overlap_iter_bandit_semgrep = sorted(cwe_bandit_iter & cwe_semgrep_iter)
+                    overlap_iter_all = sorted(cwe_custom_iter & cwe_bandit_iter & cwe_semgrep_iter)
+
+                    audit_data = {
+                        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                        "workflow": "new_prompt_analysis",
+                        "workflow_type": "manual_prompt",
+                        "workflow_id": workflow_result.get('workflow_id'),
+                        "prompt": st.session_state.get("active_prompt", ""),
+                        "response": st.session_state.last_generated_code,
+                        "prompt_count": st.session_state.prompt_count,
+                        "vulnerabilities_found": total_vulns,
+                        "cwe_overlap_initial": {
+                            "custom_and_bandit": overlap_init_custom_bandit,
+                            "custom_and_semgrep": overlap_init_custom_semgrep,
+                            "bandit_and_semgrep": overlap_init_bandit_semgrep,
+                            "all_three": overlap_init_all,
+                            "custom_and_bandit_count": len(overlap_init_custom_bandit),
+                            "custom_and_semgrep_count": len(overlap_init_custom_semgrep),
+                            "bandit_and_semgrep_count": len(overlap_init_bandit_semgrep),
+                            "all_three_count": len(overlap_init_all)
+                        },
+                        "cwe_overlap_iteration": {
+                            "custom_and_bandit": overlap_iter_custom_bandit,
+                            "custom_and_semgrep": overlap_iter_custom_semgrep,
+                            "bandit_and_semgrep": overlap_iter_bandit_semgrep,
+                            "all_three": overlap_iter_all,
+                            "custom_and_bandit_count": len(overlap_iter_custom_bandit),
+                            "custom_and_semgrep_count": len(overlap_iter_custom_semgrep),
+                            "bandit_and_semgrep_count": len(overlap_iter_bandit_semgrep),
+                            "all_three_count": len(overlap_iter_all)
+                        },
+                        **vuln_tracking
+                    }
                     self.audit.save(
-                        {
-                            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-                            "workflow": "new_prompt",
-                            "prompt": st.session_state.get("active_prompt", ""),
-                            "response": st.session_state.last_generated_code,
-                            "prompt_count": st.session_state.prompt_count,
-                            "vulnerabilities_found": workflow_result.get('vulnerability_count', 0),
-                            "workflow_id": workflow_result.get('workflow_id')
-                        }
+                        audit_data,
+                        workflow_id=f"audit_{workflow_result.get('workflow_id')}"
                     )
                     # Only show analysis view if vulnerabilities found by any tool
                     custom_count = workflow_result.get('vulnerability_count', 0)
@@ -503,6 +900,12 @@ class App:
                 st.markdown("<style>div.stAlert{max-width:fit-content !important;}</style>", unsafe_allow_html=True)
                 st.warning("Maximum prompts reached (20).")
             else:
+                # Extract file identifier from selected dataset file
+                # Convert "CWE-020/author_1.py" to "CWE-020_author_1"
+                file_identifier = selected.replace('/', '_').replace('.py', '').replace('.', '_')
+                
+                # Create new session folder for this prompt execution
+                self.audit.set_session_folder(force_new=True, workflow_type="dataset_prompt", file_identifier=file_identifier)
                 text = self.client_wrapper.generate_code_only_response(
                     content,
                     max_tokens=MAX_RESPONSE_TOKENS,
@@ -513,22 +916,12 @@ class App:
                 st.session_state.last_generated_code = text
                 st.session_state.active_prompt = f"Dataset: {selected}"
                 
-                # Check if prompt was edited
+                # Check if prompt was edited and store for later use in analysis
                 original_content = mp[selected]["content"]
                 was_edited = content != original_content
-                
-                self.audit.save(
-                    {
-                        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-                        "workflow": "dataset_prompt",
-                        "file": selected,
-                        "content": content,
-                        "original_content": original_content if was_edited else None,
-                        "prompt_edited": was_edited,
-                        "response": text,
-                        "prompt_count": st.session_state.prompt_count,
-                    }
-                )
+                st.session_state.dataset_original_content = original_content
+                st.session_state.dataset_prompt_edited = was_edited
+                st.session_state.dataset_file_selected = selected
         
         # Display generated code outside column context for full width
         if st.session_state.get("last_generated_code") and st.session_state.get("active_prompt", "").startswith("Dataset:"):
@@ -538,8 +931,17 @@ class App:
         if st.session_state.get("last_generated_code"):
             # Smaller left-aligned analyze button for dataset flow
             colAnalyze, _ = st.columns([0.50, 0.50])
+            restricted_msg = "This LLM is restricted to generating Python code only. Your request does not appear to be code-related."
+            last_code = (st.session_state.get("last_generated_code") or "").strip()
+            is_restricted = last_code == restricted_msg
             with colAnalyze:
-                analyze_clicked = st.button("Analyze Vulnerabilities", key="dataset_analyze_btn")
+                analyze_clicked = st.button(
+                    "Analyze Vulnerabilities",
+                    key="dataset_analyze_btn",
+                    disabled=is_restricted
+                )
+            if is_restricted:
+                st.info("Analysis disabled: LLM did not return code.")
             
             if analyze_clicked:
                 if not st.session_state.get("last_generated_code"):
@@ -547,22 +949,51 @@ class App:
                     st.warning("Generate code before analyzing.")
                 else:
                     with st.spinner("Running vulnerability analysis..."):
+                        session_folder = self.audit.get_session_folder()
                         workflow_result = self.workflow.run_complete_workflow(
                             st.session_state.last_generated_code,
-                            prompt=st.session_state.get("active_prompt", "")
+                            prompt=st.session_state.get("active_prompt", ""),
+                            output_dir=session_folder
                         )
                         st.session_state.last_workflow_result = workflow_result
+                    # Compute total vulnerabilities across original and all iterations by all tools
+                    metrics_obj = workflow_result.get('metrics', {}) or {}
+                    total_vulns = (
+                        metrics_obj.get('total_detected_all_occurrences')
+                        or workflow_result.get('total_vulns_found_all_occurrences')
+                        or len(workflow_result.get('all_found_vulns_total', [])
+                               or workflow_result.get('all_found_vulns_occurrences', [])
+                               or workflow_result.get('all_found_vulns_initial', []))
+                    )
+                    # Fallback to initial-only sum if aggregates not present
+                    if not isinstance(total_vulns, int):
+                        custom_count = workflow_result.get('vulnerability_count', 0)
+                        bandit_count = len(workflow_result.get('bandit_original', {}).get('issues', []))
+                        semgrep_count = len(workflow_result.get('semgrep_original', {}).get('issues', []))
+                        total_vulns = custom_count + bandit_count + semgrep_count
+
+                    # Extract comprehensive vulnerability tracking data
+                    vuln_tracking = self._extract_vulnerability_tracking_data(workflow_result)
+                    
+                    # Create comprehensive single audit file for dataset_prompt
+                    audit_data = {
+                        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                        "workflow": "dataset_prompt_analysis",
+                        "workflow_type": "dataset_prompt",
+                        "workflow_id": workflow_result.get('workflow_id'),
+                        "file": st.session_state.get('dataset_file_selected', selected),
+                        "content": st.session_state.get('last_generated_code', ''),
+                        "original_content": st.session_state.get('dataset_original_content', ''),
+                        "prompt_edited": st.session_state.get('dataset_prompt_edited', False),
+                        "response": st.session_state.last_generated_code,
+                        "prompt_count": st.session_state.prompt_count,
+                        "vulnerabilities_found": total_vulns,
+                        **vuln_tracking
+                    }
+                    
                     self.audit.save(
-                        {
-                            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-                            "workflow": "dataset_prompt_analysis",
-                            "file": selected,
-                            "content": content,
-                            "response": st.session_state.last_generated_code,
-                            "prompt_count": st.session_state.prompt_count,
-                            "vulnerabilities_found": workflow_result.get('vulnerability_count', 0),
-                            "workflow_id": workflow_result.get('workflow_id')
-                        }
+                        audit_data,
+                        workflow_id=f"audit_{workflow_result.get('workflow_id')}"
                     )
                     # Only show analysis view if vulnerabilities found by any tool
                     custom_count = workflow_result.get('vulnerability_count', 0)
