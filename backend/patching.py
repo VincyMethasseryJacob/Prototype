@@ -1,21 +1,21 @@
 """
 Patching module: Generates secure, patched code versions for detected vulnerabilities.
 """
-
 import re
 import ast
 from typing import List, Dict, Optional
-
-
 class CodePatcher:
     """
     Automatically generates patches for detected vulnerabilities based on CWE type.
     """
-    
     def __init__(self, openai_client=None):
         self.openai_client = openai_client
         self.patch_rules = self._initialize_patch_rules()
-    
+    @staticmethod
+    def _remove_empty_lines(code: str) -> str:
+        """Remove all empty lines from code."""
+        lines = [line for line in code.splitlines() if line.strip()]
+        return '\n'.join(lines)
     def _initialize_patch_rules(self) -> Dict[str, callable]:
         """
         Initialize patching rules for each CWE category.
@@ -56,7 +56,6 @@ class CodePatcher:
             '798': self._patch_hardcoded_credentials,
             '835': self._patch_infinite_loop,
         }
-    
     def generate_patch(self, code: str, vulnerabilities: List[Dict]) -> Dict:
         """
         Generate a patched version of code addressing all detected vulnerabilities.
@@ -70,14 +69,11 @@ class CodePatcher:
                 'changes': [],
                 'unpatched_vulns': []
             }
-        
         patched_code = code
         changes = []
         unpatched_vulns = []
-        
         # Sort vulnerabilities by line number (descending) to avoid line number shifts
         sorted_vulns = sorted(vulnerabilities, key=lambda v: v.get('line_number', 0), reverse=True)
-        
         for vuln in sorted_vulns:
             cwe_id = vuln.get('cwe_id')
             detection_method = vuln.get('detection_method', 'unknown')
@@ -91,7 +87,7 @@ class CodePatcher:
                     patch_success = result.get('success', False)
                     change_description = result.get('description', '')
                     if patch_success:
-                        patched_code = result['patched_code']
+                        patched_code = self._remove_empty_lines(result['patched_code'])
                 except Exception as e:
                     patch_success = False
                     print(f"Error patching CWE-{cwe_id}: {e}")
@@ -103,7 +99,7 @@ class CodePatcher:
                     patch_success = result.get('success', False)
                     change_description = result.get('description', '')
                     if patch_success:
-                        patched_code = result['patched_code']
+                        patched_code = self._remove_empty_lines(result['patched_code'])
                 else:
                     patch_success = False
             if patch_success:
@@ -117,18 +113,17 @@ class CodePatcher:
                 })
             else:
                 unpatched_vulns.append(vuln)
-        
+        # Remove empty lines from final patched code
+        patched_code = self._remove_empty_lines(patched_code)
         return {
             'patched_code': patched_code,
             'changes': changes,
             'unpatched_vulns': unpatched_vulns
         }
-    
     def _patch_sql_injection(self, code: str, vuln: Dict) -> Dict:
         """Patch SQL injection vulnerabilities."""
         patched = code
         description = []
-        
         # Pattern 1: String formatting with %
         if re.search(r'execute\(["\'].*%s.*["\']', code):
             patched = re.sub(
@@ -137,7 +132,6 @@ class CodePatcher:
                 patched
             )
             description.append("Replaced string formatting with parameterized query")
-        
         # Pattern 2: f-strings in SQL
         if re.search(r'execute\(f["\']', code):
             # This is complex, mark for manual review or LLM
@@ -145,7 +139,6 @@ class CodePatcher:
                 return self._llm_based_patch(code, vuln)
             else:
                 return {'success': False}
-        
         # Pattern 3: String concatenation
         if re.search(r'execute\([^)]*\+[^)]*\)', code):
             # Add comment suggesting parameterized queries
@@ -155,46 +148,36 @@ class CodePatcher:
                 patched
             )
             description.append("Marked string concatenation for parameterized query conversion")
-        
         # Add safe import if needed
         if 'import sqlite3' in code or 'import mysql.connector' in code or 'import psycopg2' in code:
             description.append("Ensure using parameterized queries with placeholders (?, %s, or :name)")
-        
         return {
             'success': len(description) > 0,
             'patched_code': patched,
             'description': '; '.join(description)
         }
-    
     def _patch_path_traversal(self, code: str, vuln: Dict) -> Dict:
         """Patch path traversal vulnerabilities."""
         patched = code
-        
         # Add secure path handling
         if 'import os' not in code:
             patched = 'import os\n' + patched
-        
         # Add path validation function
-        validation_func = '''
-def validate_safe_path(base_dir, user_path):
+        validation_func = '''def validate_safe_path(base_dir, user_path):
     """Validate that the path is within the allowed directory."""
     abs_base = os.path.abspath(base_dir)
     abs_user = os.path.abspath(os.path.join(base_dir, user_path))
     return abs_user.startswith(abs_base) and '..' not in user_path
-
 '''
-        
         if 'def validate_safe_path' not in patched:
             # Insert after imports
             import_end = 0
             for line_num, line in enumerate(patched.splitlines()):
                 if line.startswith('import ') or line.startswith('from '):
                     import_end = line_num + 1
-            
             lines = patched.splitlines()
             lines.insert(import_end, validation_func)
             patched = '\n'.join(lines)
-        
         # Replace dangerous file operations
         patched = re.sub(
             r'os\.remove\(([^)]+)\)',
@@ -213,22 +196,18 @@ def validate_safe_path(base_dir, user_path):
             'patched_code': patched,
             'description': 'Added path validation to prevent directory traversal'
         }
-    
     def _patch_command_injection(self, code: str, vuln: Dict) -> Dict:
         """Patch OS command injection vulnerabilities."""
         patched = code
-        
         # Replace os.system with subprocess with list arguments
         patched = re.sub(
             r'os\.system\(([^)]+)\)',
             r'subprocess.run([\1], shell=False, check=True)  # Fixed: use list args',
             patched
         )
-        
         # Ensure subprocess is imported
         if 'import subprocess' not in patched and 'subprocess.run' in patched:
             patched = 'import subprocess\n' + patched
-        
         # Add comment for shell=True usage
         patched = re.sub(
             r'(subprocess\.(run|call|Popen)\([^)]*shell\s*=\s*True[^)]*\))',
@@ -241,22 +220,18 @@ def validate_safe_path(base_dir, user_path):
             'patched_code': patched,
             'description': 'Replaced os.system with subprocess.run using safe list arguments'
         }
-    
     def _patch_eval_injection(self, code: str, vuln: Dict) -> Dict:
         """Patch eval/exec injection vulnerabilities."""
         patched = code
-        
         # Replace eval with ast.literal_eval for safe literal evaluation
         patched = re.sub(
             r'\beval\(',
             r'ast.literal_eval(',
             patched
         )
-        
         # Add ast import if needed
         if 'import ast' not in patched and 'ast.literal_eval' in patched:
             patched = 'import ast\n' + patched
-        
         # Add warning for exec
         patched = re.sub(
             r'(\bexec\([^)]+\))',
@@ -269,18 +244,15 @@ def validate_safe_path(base_dir, user_path):
             'patched_code': patched,
             'description': 'Replaced eval() with ast.literal_eval() for safe literal evaluation'
         }
-    
     def _patch_hardcoded_password(self, code: str, vuln: Dict) -> Dict:
         """Patch hard-coded password vulnerabilities."""
         patched = code
-        
         # Replace hard-coded passwords with environment variables
         patterns = [
             (r'password\s*=\s*["\'][^"\']+["\']', 'password = os.getenv("DB_PASSWORD")'),
             (r'passwd\s*=\s*["\'][^"\']+["\']', 'passwd = os.getenv("DB_PASSWORD")'),
             (r'pwd\s*=\s*["\'][^"\']+["\']', 'pwd = os.getenv("PASSWORD")'),
         ]
-        
         for pattern, replacement in patterns:
             if re.search(pattern, patched, re.IGNORECASE):
                 patched = re.sub(pattern, replacement, patched, flags=re.IGNORECASE)
@@ -294,18 +266,15 @@ def validate_safe_path(base_dir, user_path):
             'patched_code': patched,
             'description': 'Replaced hard-coded passwords with environment variables'
         }
-    
     def _patch_hardcoded_credentials(self, code: str, vuln: Dict) -> Dict:
         """Patch hard-coded credentials (API keys, tokens, secrets)."""
         patched = code
-        
         # Replace hard-coded credentials with environment variables
         patterns = [
             (r'api_key\s*=\s*["\'][^"\']+["\']', 'api_key = os.getenv("API_KEY")'),
             (r'secret\s*=\s*["\'][^"\']+["\']', 'secret = os.getenv("SECRET_KEY")'),
             (r'token\s*=\s*["\'][^"\']+["\']', 'token = os.getenv("AUTH_TOKEN")'),
         ]
-        
         for pattern, replacement in patterns:
             if re.search(pattern, patched, re.IGNORECASE):
                 patched = re.sub(pattern, replacement, patched, flags=re.IGNORECASE)
@@ -319,46 +288,38 @@ def validate_safe_path(base_dir, user_path):
             'patched_code': patched,
             'description': 'Replaced hard-coded credentials with environment variables'
         }
-    
     def _patch_deserialization(self, code: str, vuln: Dict) -> Dict:
         """Patch unsafe deserialization vulnerabilities."""
         patched = code
-        
         # Replace pickle with json for safer serialization
         patched = re.sub(
             r'pickle\.loads?\(',
             r'json.loads(',
             patched
         )
-        
         # Replace unsafe YAML loading
         patched = re.sub(
             r'yaml\.load\(([^,)]+)\)',
             r'yaml.safe_load(\1)',
             patched
         )
-        
         # Add imports if needed
         if 'import json' not in patched and 'json.loads' in patched:
             patched = 'import json\n' + patched
-        
         return {
             'success': True,
             'patched_code': patched,
             'description': 'Replaced unsafe deserialization with safer alternatives (json.loads, yaml.safe_load)'
         }
-    
     def _patch_weak_encryption(self, code: str, vuln: Dict) -> Dict:
         """Patch weak encryption algorithm usage."""
         patched = code
-        
         # Replace DES with AES
         patched = re.sub(
             r'DES\.new\(',
             r'AES.new(',
             patched
         )
-        
         # Replace MD5 with SHA256
         patched = re.sub(
             r'hashlib\.md5\(',
@@ -377,11 +338,9 @@ def validate_safe_path(base_dir, user_path):
             'patched_code': patched,
             'description': 'Replaced weak cryptographic algorithms with stronger alternatives (AES, SHA256)'
         }
-    
     def _patch_weak_random(self, code: str, vuln: Dict) -> Dict:
         """Patch weak random number generation for security."""
         patched = code
-        
         # Replace random.random() with secrets
         patched = re.sub(
             r'\brandom\.random\(\)',
@@ -394,83 +353,67 @@ def validate_safe_path(base_dir, user_path):
             r'secrets.randbelow(',
             patched
         )
-        
         # Add secrets import if needed
         if 'import secrets' not in patched and 'secrets.' in patched:
             patched = 'import secrets\n' + patched
-        
         return {
             'success': True,
             'patched_code': patched,
             'description': 'Replaced weak random with cryptographically secure random (secrets module)'
         }
-    
     def _patch_xxe(self, code: str, vuln: Dict) -> Dict:
         """Patch XML External Entity (XXE) vulnerabilities."""
         patched = code
-        
         # Use defusedxml
         patched = re.sub(
             r'from xml\.etree import ElementTree',
             r'from defusedxml import ElementTree',
             patched
         )
-        
         patched = re.sub(
             r'import xml\.etree\.ElementTree',
             r'import defusedxml.ElementTree as ElementTree',
             patched
         )
-        
         # Add comment about defusedxml
         if 'defusedxml' in patched:
             patched = '# Using defusedxml to prevent XXE attacks\n' + patched
-        
         return {
             'success': True,
             'patched_code': patched,
             'description': 'Replaced xml.etree with defusedxml to prevent XXE attacks'
         }
-    
     def _patch_cleartext_transmission(self, code: str, vuln: Dict) -> Dict:
         """Patch cleartext transmission vulnerabilities."""
         patched = code
-        
         # Replace http:// with https://
         patched = re.sub(
             r'["\']http://([^"\']+)["\']',
             r'"https://\1"',
             patched
         )
-        
         # Add SSL context for connections
         patched = re.sub(
             r'(urllib\.request\.urlopen\([^)]+)\)',
             r'\1, context=ssl.create_default_context())',
             patched
         )
-        
         if 'ssl.create_default_context' in patched and 'import ssl' not in patched:
             patched = 'import ssl\n' + patched
-        
         return {
             'success': True,
             'patched_code': patched,
             'description': 'Enforced HTTPS and added SSL context for secure transmission'
         }
-    
     def _patch_improper_input_validation(self, code: str, vuln: Dict) -> Dict:
         """Patch improper input validation vulnerabilities."""
         patched = code
         description = []
-        
         # Add input validation function
-        validation_func = '''
-def validate_input(user_input, input_type='string', max_length=None, allowed_chars=None):
+        validation_func = '''def validate_input(user_input, input_type='string', max_length=None, allowed_chars=None):
     """Validate user input with type checking and sanitization."""
     if user_input is None:
         raise ValueError("Input cannot be None")
-    
     if input_type == 'string':
         if not isinstance(user_input, str):
             raise TypeError("Expected string input")
@@ -483,18 +426,14 @@ def validate_input(user_input, input_type='string', max_length=None, allowed_cha
             return int(user_input)
         except ValueError:
             raise ValueError("Input must be an integer")
-    
     return user_input
-
 '''
-        
         if 'def validate_input' not in patched:
             # Insert validation function after imports
             import_end = 0
             for line_num, line in enumerate(patched.splitlines()):
                 if line.startswith('import ') or line.startswith('from '):
                     import_end = line_num + 1
-            
             lines = patched.splitlines()
             lines.insert(import_end, validation_func)
             patched = '\n'.join(lines)
@@ -1200,16 +1139,13 @@ def sanitize_log_input(log_data):
     def _patch_infinite_loop(self, code: str, vuln: Dict) -> Dict:
         """Patch infinite loop vulnerabilities."""
         patched = code
-        
         # Add loop safety comment only if not already present
-        loop_comment = '''
-# SECURITY: Prevent infinite loops
+        loop_comment = '''# SECURITY: Prevent infinite loops
 # - Ensure all loops have proper exit conditions
 # - Add iteration limits for unbounded loops
 # - Validate loop control variables
 # - Consider adding timeouts for long-running loops
 '''
-        
         if '# SECURITY: Prevent infinite loops' not in patched:
             patched = loop_comment + '\n' + patched
         
@@ -1239,18 +1175,30 @@ def sanitize_log_input(log_data):
             return {'success': False}
         
         try:
+            # Build the prompt with patch recommendation if available
+            patch_recommendation = vuln.get('patch_note', '')
+            if patch_recommendation:
+                recommendation_section = f"\nRecommended Fix Guidance (advisory): {patch_recommendation}"
+                task_step_2 = "2. Apply the recommended fix approach to solve the security vulnerability"
+            else:
+                recommendation_section = ""
+                task_step_2 = """2. Use the recommended fix approach as guidance where applicable.
+If the recommendation is ambiguous, outdated, or conflicts with secure coding best practices,
+apply the safest modern mitigation instead."""
             prompt = f"""
-You are a security expert. Fix the following security vulnerability:
-
-CWE-{vuln.get('cwe_id')}: {vuln.get('cwe_name')}
-Line {vuln.get('line_number')}: {vuln.get('description')}
-
-Vulnerable code:
+You are a senior application security engineer and Python expert. 
+Security Vulnerability: CWE-{vuln.get('cwe_id')} - {vuln.get('cwe_name')}
+Description: {vuln.get('description')}{recommendation_section}
+Code to analyze:
 ```python
 {code}
 ```
-
-Provide ONLY the fixed code without explanations. Maintain all functionality while addressing the security issue.
+Task:
+1. You will be given code and a identified security vulnerability (CWE id/description/code). Your job is to patch the vulnerability in the code.
+{task_step_2}
+3. Ensure the fixed code is error-free with no syntax issues
+4. Return ONLY the complete fixed code without any explanations
+5. IMPORTANT: Do NOT include any empty lines in the code - remove all blank lines
 """
             
             response = self.openai_client.generate_code_only_response(prompt, max_tokens=2000)
@@ -1264,7 +1212,8 @@ Provide ONLY the fixed code without explanations. Maintain all functionality whi
                 # Remove trailing fence
                 patched = patched[:-3]
             patched = patched.strip()
-            
+            # Remove all empty lines from LLM-generated code
+            patched = self._remove_empty_lines(patched)
             return {
                 'success': True,
                 'patched_code': patched,
@@ -1272,11 +1221,9 @@ Provide ONLY the fixed code without explanations. Maintain all functionality whi
             }
         except Exception as e:
             return {'success': False}
-    
     def generate_diff(self, original: str, patched: str) -> str:
         """Generate a human-readable diff between original and patched code."""
         import difflib
-        
         diff = difflib.unified_diff(
             original.splitlines(keepends=True),
             patched.splitlines(keepends=True),
@@ -1284,10 +1231,7 @@ Provide ONLY the fixed code without explanations. Maintain all functionality whi
             tofile='patched.py',
             lineterm=''
         )
-        
         return ''.join(diff)
-
-
 # Backwards compatibility function
 def generate_patch(code: str, openai_client=None) -> str:
     """
