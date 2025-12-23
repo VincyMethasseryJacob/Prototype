@@ -107,7 +107,7 @@ streamlit run "Streamlit app/app_main.py"
 Features:
 - Vulnerability detection using pattern and AST analysis across 30+ CWE categories.
 - Explainability: plain‑language descriptions and patch recommendations.
-- Reporting: summary + detailed findings, CSV/JSON export, basic stats.
+- Reporting: summary + detailed findings, JSON export, basic stats.
 - Integrates backend workflow for iterative patching and validation.
 
 Relevant UI services:
@@ -141,8 +141,7 @@ pip install -r backend/requirements.txt
 
 ## Reports
 
-- Streamlit exports: CSV/JSON under `Streamlit app/reports/`.
-- Backend workflow reports: under `reports/` (configurable in `VulnerabilityAnalysisWorkflow`).
+- Streamlit exports: JSON under `Streamlit app/audit_records/`.
 
 ## Notes
 

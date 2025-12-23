@@ -21,7 +21,7 @@ This backend module provides comprehensive vulnerability detection, patching, an
 - **Rule-Based Patching**: Automated fixes for common vulnerability patterns
 - **LLM-Based Patching**: Use OpenAI for complex patching scenarios
 - **Multi-CWE Support**: Handles SQL injection, path traversal, command injection, and more
-- **Iterative Repair**: Multiple patching iterations until code is clean
+- **Iterative Repair**: Multiple patching iterations until code is clean or reaches the max iterations.
 
 ### 🔬 Static Analysis
 - **Bandit Integration**: Primary static analysis tool
@@ -33,7 +33,7 @@ This backend module provides comprehensive vulnerability detection, patching, an
 - **Effectiveness Metrics**: Precision, recall, F1-score, accuracy
 - **Patching Success Rate**: Measure how many vulnerabilities were fixed
 - **Tool Comparison**: Analyze detection overlap between tools
-- **Multiple Export Formats**: JSON, CSV, HTML reports
+- **Export Formats**: HTML reports
 
 ## Module Structure
 
@@ -83,7 +83,7 @@ workflow = VulnerabilityAnalysisWorkflow(
     vulnerable_samples_dir="path/to/vulnerable/samples",
     reports_dir="reports",
     openai_client=your_openai_client,  # Optional
-    max_patch_iterations=3
+    max_patch_iterations=6
 )
 
 # Run complete analysis
@@ -132,10 +132,10 @@ from backend.static_analysis import StaticAnalyzer
 
 analyzer = StaticAnalyzer()
 bandit_results = analyzer.run_bandit(code)
-pylint_results = analyzer.run_pylint(code)
+semgrep_results = analyzer.run_semgrep(code)
 
 print(f"Bandit issues: {len(bandit_results['issues'])}")
-print(f"Pylint issues: {len(pylint_results['issues'])}")
+print(f"Semgrep issues: {len(semgrep_results['issues'])}")
 ```
 
 ## Installation
@@ -181,7 +181,7 @@ Control how many times the system attempts to patch code:
 ```python
 workflow = VulnerabilityAnalysisWorkflow(
     vulnerable_samples_dir="...",
-    max_patch_iterations=5  # Default: 3
+    max_patch_iterations=6 
 )
 ```
 
@@ -207,7 +207,7 @@ The framework generates multiple report types:
 - **Patch Reports**: JSON with before/after code and changes
 - **Code Diffs**: Unified diff format showing changes
 - **Static Analysis Reports**: JSON with Bandit and Semgrep results
-- **Metrics Reports**: JSON and CSV with effectiveness metrics
+- **Metrics Reports**: JSON with effectiveness metrics
 - **HTML Summary**: Human-readable HTML report
 
 ## Extending the Framework
