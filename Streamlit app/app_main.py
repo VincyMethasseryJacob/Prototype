@@ -368,6 +368,21 @@ class App:
         """
         metrics = workflow_result.get('metrics', {}) or {}
         
+        def _normalize_cwe_id(cwe_id: str) -> str:
+            """Normalize CWE identifiers to zero-padded numeric codes where possible."""
+            if cwe_id is None:
+                return ""
+            cwe = str(cwe_id).strip()
+            if not cwe:
+                return ""
+            if cwe.upper().startswith("CWE-"):
+                cwe = cwe[4:]
+            if ":" in cwe:
+                cwe = cwe.split(":", 1)[0].strip()
+            if cwe.isdigit():
+                return f"{int(cwe):03d}"
+            return cwe
+
         # Initial vulnerabilities by tool
         initial_custom = workflow_result.get('initial_custom_count', 0)
         initial_bandit = workflow_result.get('initial_bandit_count', 0)
@@ -484,17 +499,20 @@ class App:
         
         # Initial patch fixes
         initial_patch = workflow_result.get('initial_patch_result', {})
+        real_fixed_cwes = set()
         if initial_patch:
             changes = initial_patch.get('changes', [])
             for change in changes:
-                # Extract actual detection and patch methods from the change data
                 detection_method = change.get('detection_method', 'custom')
                 patch_method = change.get('patch_method', 'rule-based')
-                
+                cwe_id_raw = change.get('cwe_id', 'Unknown')
+                cwe_id_norm = _normalize_cwe_id(cwe_id_raw)
+                cwe_key = cwe_id_norm or str(cwe_id_raw)
+                real_fixed_cwes.add(cwe_key)
                 vulnerability_fixes.append({
                     'phase': 'initial_patch',
                     'iteration': 0,
-                    'cwe_id': change.get('cwe_id', 'Unknown'),
+                    'cwe_id': cwe_key,
                     'cwe_name': change.get('cwe_name', 'Unknown'),
                     'detection_method': detection_method,
                     'detection_technique': self._get_detection_technique_description(detection_method),
@@ -510,16 +528,17 @@ class App:
         for iteration in patch_iterations:
             iteration_num = iteration.get('iteration_number', 0)
             changes = iteration.get('changes', [])
-            
             for change in changes:
-                # Extract actual detection and patch methods from the change data
                 detection_method = change.get('detection_method', change.get('source', 'custom'))
                 patch_method = change.get('patch_method', 'rule-based')
-                
+                cwe_id_raw = change.get('cwe_id', 'Unknown')
+                cwe_id_norm = _normalize_cwe_id(cwe_id_raw)
+                cwe_key = cwe_id_norm or str(cwe_id_raw)
+                real_fixed_cwes.add(cwe_key)
                 vulnerability_fixes.append({
                     'phase': 'iterative_repair',
                     'iteration': iteration_num,
-                    'cwe_id': change.get('cwe_id', 'Unknown'),
+                    'cwe_id': cwe_key,
                     'cwe_name': change.get('cwe_name', 'Unknown'),
                     'detection_method': detection_method,
                     'detection_technique': self._get_detection_technique_description(detection_method),
@@ -529,37 +548,58 @@ class App:
                     'original_code': change.get('original_line', ''),
                     'patched_code': change.get('patched_line', '')
                 })
-            
-            # Also capture custom detector specific information from iterations
-            custom_vulns = iteration.get('custom_detector_vulns', {})
-            for cwe_key, vuln_data in custom_vulns.items():
-                # Check if we haven't already captured this from changes
-                cwe_id = vuln_data.get('cwe_id')
-                if not any(f['cwe_id'] == cwe_id and f['iteration'] == iteration_num for f in vulnerability_fixes):
-                    vulnerability_fixes.append({
-                        'phase': 'iterative_repair',
-                        'iteration': iteration_num,
-                        'cwe_id': cwe_id,
-                        'cwe_name': vuln_data.get('cwe_name', 'Unknown'),
-                        'detection_method': 'custom_detector',
-                        'detection_technique': 'Multiple AST-based techniques',
-                        'lines_fixed': vuln_data.get('lines', []),
-                        'fix_technique': 'rule-based or llm-based',
-                        'fix_description': vuln_data.get('explanations', [])
-                    })
+            # Do NOT add custom_detector_vulns unless also in changes (i.e., actually fixed)
         
         # Count fix techniques used
         fix_technique_counts = {}
         detection_technique_counts = {}
         cwe_fix_technique_map = {}
+        cwe_tool_fix_map = {}
         for fix in vulnerability_fixes:
             fix_tech = fix.get('fix_technique', 'unknown')
             det_method = fix.get('detection_method', 'unknown')
-            cwe_id = str(fix.get('cwe_id', ''))
-            fix_technique_counts[fix_tech] = fix_technique_counts.get(fix_tech, 0) + 1
-            detection_technique_counts[det_method] = detection_technique_counts.get(det_method, 0) + 1
-            if cwe_id:
-                cwe_fix_technique_map[cwe_id] = fix_tech
+            cwe_id_norm = _normalize_cwe_id(fix.get('cwe_id'))
+            if not cwe_id_norm:
+                continue
+            if cwe_id_norm in real_fixed_cwes:
+                fix_technique_counts[fix_tech] = fix_technique_counts.get(fix_tech, 0) + 1
+                detection_technique_counts[det_method] = detection_technique_counts.get(det_method, 0) + 1
+                if cwe_id_norm not in cwe_fix_technique_map:
+                    cwe_fix_technique_map[cwe_id_norm] = set()
+                cwe_fix_technique_map[cwe_id_norm].add(fix_tech)
+                # Map tool to CWE to fix type(s)
+                tool = det_method
+                if tool not in cwe_tool_fix_map:
+                    cwe_tool_fix_map[tool] = {}
+                if cwe_id_norm not in cwe_tool_fix_map[tool]:
+                    cwe_tool_fix_map[tool][cwe_id_norm] = set()
+                cwe_tool_fix_map[tool][cwe_id_norm].add(fix_tech)
+
+        def _format_fix_methods(methods):
+            if not methods:
+                return ""
+            if isinstance(methods, str):
+                return methods
+            if isinstance(methods, (set, list, tuple)):
+                ordered = sorted(m for m in methods if m)
+                return ", ".join(ordered)
+            return str(methods)
+
+        # Helper to get fix type for a given tool and cwe_id
+        def get_fix_type(tool, cwe_id):
+            cwe_key = _normalize_cwe_id(cwe_id)
+            if not cwe_key:
+                return ""
+            methods = cwe_tool_fix_map.get(tool, {}).get(cwe_key)
+            if not methods:
+                methods = cwe_fix_technique_map.get(cwe_key)
+            return _format_fix_methods(methods)
+
+        def add_fixed_by(vuln_list, tool):
+            for v in vuln_list:
+                fix_value = get_fix_type(tool, v.get("cwe_id"))
+                v["fixed_by"] = fix_value
+            return vuln_list
 
         result = {
             'total_vulnerabilities_identified': custom_total + bandit_total + semgrep_total,
@@ -570,7 +610,7 @@ class App:
             'initial_run_by_tool': {
                 'custom_detector': {
                     'count': initial_custom,
-                    'identified_vulnerabilities': [
+                    'identified_vulnerabilities': add_fixed_by([
                         {
                             'cwe_id': v.get('cwe_id'),
                             'cwe_name': v.get('cwe_name'),
@@ -579,11 +619,11 @@ class App:
                             'description': v.get('description'),
                             'detection_method': v.get('detection_method', 'custom')
                         } for v in initial_vulns_custom
-                    ]
+                    ], 'ast-taint')
                 },
                 'bandit': {
                     'count': initial_bandit,
-                    'identified_vulnerabilities': [
+                    'identified_vulnerabilities': add_fixed_by([
                         {
                             'cwe_id': v.get('cwe_id'),
                             'cwe_name': v.get('cwe_name'),
@@ -592,11 +632,11 @@ class App:
                             'description': v.get('description'),
                             'test_id': initial_vulns_bandit[i].get('test_id') if i < len(initial_vulns_bandit) else None
                         } for i, v in enumerate(initial_bandit_converted)
-                    ]
+                    ], 'bandit')
                 },
                 'semgrep': {
                     'count': initial_semgrep,
-                    'identified_vulnerabilities': [
+                    'identified_vulnerabilities': add_fixed_by([
                         {
                             'cwe_id': v.get('cwe_id'),
                             'cwe_name': v.get('cwe_name'),
@@ -605,19 +645,19 @@ class App:
                             'description': v.get('description'),
                             'check_id': initial_vulns_semgrep[i].get('check_id') if i < len(initial_vulns_semgrep) else None
                         } for i, v in enumerate(initial_semgrep_converted)
-                    ]
+                    ], 'semgrep')
                 }
             },
             'iterations_by_tool': {
                 'custom_detector': {
                     'count': iteration_custom,
                     'total_across_all_iterations': custom_total,
-                    'identified_vulnerabilities': iteration_vulns_custom
+                    'identified_vulnerabilities': add_fixed_by(iteration_vulns_custom, 'ast-taint')
                 },
                 'bandit': {
                     'count': iteration_bandit,
                     'total_across_all_iterations': bandit_total,
-                    'identified_vulnerabilities': [
+                    'identified_vulnerabilities': add_fixed_by([
                         {
                             'cwe_id': v.get('cwe_id'),
                             'cwe_name': v.get('cwe_name'),
@@ -625,12 +665,12 @@ class App:
                             'severity': v.get('severity'),
                             'description': v.get('description')
                         } for v in iteration_vulns_bandit
-                    ]
+                    ], 'bandit')
                 },
                 'semgrep': {
                     'count': iteration_semgrep,
                     'total_across_all_iterations': semgrep_total,
-                    'identified_vulnerabilities': [
+                    'identified_vulnerabilities': add_fixed_by([
                         {
                             'cwe_id': v.get('cwe_id'),
                             'cwe_name': v.get('cwe_name'),
@@ -638,13 +678,10 @@ class App:
                             'severity': v.get('severity'),
                             'description': v.get('description')
                         } for v in iteration_vulns_semgrep
-                    ]
+                    ], 'semgrep')
                 }
-            },
-            'fix_technique_summary': cwe_fix_technique_map,
-            'detection_technique_summary': detection_technique_counts
+            }
         }
-        # vulnerabilities_by_cwe and vulnerability_fixes fields are not included in the audit output
         return result
     
     def _get_detection_technique_description(self, detection_method: str) -> str:
@@ -808,7 +845,12 @@ class App:
                             "bandit_and_semgrep_count": len(overlap_iter_bandit_semgrep),
                             "all_three_count": len(overlap_iter_all)
                         },
-                        **vuln_tracking
+                        **vuln_tracking,
+                        'initial_patch_result': workflow_result.get('initial_patch_result'),
+                        'patch_iterations': workflow_result.get('patch_iterations'),
+                        'metrics': workflow_result.get('metrics'),
+                        'vulnerabilities_with_explanations': workflow_result.get('vulnerabilities_with_explanations'),
+                        'final_patched_code': workflow_result.get('final_patched_code')
                     }
                     self.audit.save(
                         audit_data,
@@ -845,11 +887,9 @@ class App:
         # Track dataset selection changes and clear state when different sample is selected
         if "last_selected_dataset" not in st.session_state:
             st.session_state.last_selected_dataset = selected
-            st.session_state.edited_prompt = content
         elif st.session_state.last_selected_dataset != selected:
             # Clear previous results when selecting a different dataset sample
             st.session_state.last_selected_dataset = selected
-            st.session_state.edited_prompt = content  # Reset edited prompt to new selection
             st.session_state.last_generated_code = None
             st.session_state.last_workflow_result = None
             st.session_state.show_analysis_view = False
@@ -858,38 +898,12 @@ class App:
         
         st.markdown(get_dropdown_width_style(230), unsafe_allow_html=True)
         
-        # Initialize editing state if not present
-        if "dataset_edit_mode" not in st.session_state:
-            st.session_state.dataset_edit_mode = False
-        
         # Show code immediately on selection
         st.markdown("<div style='font-size:1.1em; font-weight:600; margin-bottom:8px;'>Prompt</div>", unsafe_allow_html=True)
         st.markdown(get_code_block_style(), unsafe_allow_html=True)
         
-        # Toggle button for edit mode
-        col1, col2 = st.columns([0.15, 0.85])
-        with col1:
-            edit_button_label = "View Mode" if st.session_state.dataset_edit_mode else "Edit Mode"
-            if st.button(edit_button_label, key="dataset_edit_toggle"):
-                st.session_state.dataset_edit_mode = not st.session_state.dataset_edit_mode
-                st.rerun()
-        
-        # Show hint message below button
-        if not st.session_state.dataset_edit_mode:
-            st.markdown("<p style='color:#888; font-size:0.9em; margin-top:-10px;'>💡 Click \"Edit Mode\" to modify the prompt</p>", unsafe_allow_html=True)
-        
-        # Display prompt based on mode
-        if st.session_state.dataset_edit_mode:
-            st.session_state.edited_prompt = st.text_area(
-                "Edit Prompt",
-                value=st.session_state.edited_prompt,
-                height=200,
-                key=f"dataset_prompt_editor_{selected}",  # Use selection-based key to force update
-                label_visibility="collapsed"
-            )
-            content = st.session_state.edited_prompt  # Use edited content for generation
-        else:
-            st.code(content, language="python")
+        # Display prompt as read-only
+        st.code(content, language="python")
         # Generate button, small and left-aligned
         colA, colB = st.columns([0.2, 0.8])
         with colA:
@@ -916,11 +930,7 @@ class App:
                 st.session_state.last_generated_code = text
                 st.session_state.active_prompt = f"Dataset: {selected}"
                 
-                # Check if prompt was edited and store for later use in analysis
-                original_content = mp[selected]["content"]
-                was_edited = content != original_content
-                st.session_state.dataset_original_content = original_content
-                st.session_state.dataset_prompt_edited = was_edited
+                # Store dataset file information for later use in analysis
                 st.session_state.dataset_file_selected = selected
         
         # Display generated code outside column context for full width
@@ -988,7 +998,12 @@ class App:
                         "response": st.session_state.last_generated_code,
                         "prompt_count": st.session_state.prompt_count,
                         "vulnerabilities_found": total_vulns,
-                        **vuln_tracking
+                        **vuln_tracking,
+                        'initial_patch_result': workflow_result.get('initial_patch_result'),
+                        'patch_iterations': workflow_result.get('patch_iterations'),
+                        'metrics': workflow_result.get('metrics'),
+                        'vulnerabilities_with_explanations': workflow_result.get('vulnerabilities_with_explanations'),
+                        'final_patched_code': workflow_result.get('final_patched_code')
                     }
                     
                     self.audit.save(
@@ -1345,6 +1360,17 @@ class App:
                     cwe_detection_methods[cwe_id] = set()
                 detection_method = occ.get('detection_method', 'custom')
                 cwe_detection_methods[cwe_id].add(detection_method)
+        
+        # Collect patch methods from initial patch result
+        initial_patch_result = results.get('initial_patch_result', {})
+        if initial_patch_result and initial_patch_result.get('changes'):
+            for change in initial_patch_result.get('changes', []):
+                cwe_id = _normalize_cwe(change.get('cwe_id', 'N/A'))
+                if cwe_id != 'N/A':
+                    if cwe_id not in cwe_patch_methods:
+                        cwe_patch_methods[cwe_id] = set()
+                    patch_method = change.get('patch_method', 'llm-based')
+                    cwe_patch_methods[cwe_id].add(patch_method)
         
         # Collect patch methods from patch iterations
         for iteration in patch_iterations:

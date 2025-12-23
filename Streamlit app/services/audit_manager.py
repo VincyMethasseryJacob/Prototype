@@ -3,6 +3,139 @@ import json
 import time
 import datetime
 
+def filter_audit_record(record: dict) -> dict:
+    """
+    Filter audit record to include only required fields.
+    
+    Args:
+        record: The complete audit record
+        
+    Returns:
+        dict: Filtered audit record with only required fields
+    """
+    # Helper function to safely extract nested values
+    def safe_get(data, *keys, default=None):
+        for key in keys:
+            if isinstance(data, dict):
+                data = data.get(key, default)
+            else:
+                return default
+        return data
+    
+    # Helper function to count CWE occurrences in a list of vulnerabilities
+    def count_cwes(vuln_list):
+        if not vuln_list or not isinstance(vuln_list, list):
+            return 0
+        cwe_set = set()
+        for v in vuln_list:
+            cwe_id = v.get('cwe_id') if isinstance(v, dict) else None
+            if cwe_id:
+                cwe_set.add(str(cwe_id))
+        return len(cwe_set)
+    
+    # Helper function to extract unique CWEs from vulnerability list
+    def extract_cwes(vuln_list):
+        if not vuln_list or not isinstance(vuln_list, list):
+            return []
+        cwe_set = set()
+        for v in vuln_list:
+            cwe_id = v.get('cwe_id') if isinstance(v, dict) else None
+            if cwe_id:
+                cwe_set.add(str(cwe_id))
+        return sorted(list(cwe_set))
+    
+    # Compute fix provider counts from patch data
+    method_counts = {'llm-based': 0, 'rule-based': 0, 'unknown': 0}
+    
+    # Process initial_patch_result if it exists
+    initial_patch = safe_get(record, 'initial_patch_result', default={})
+    if initial_patch and initial_patch.get('changes'):
+        for change in initial_patch.get('changes', []):
+            method = change.get('patch_method', 'unknown')
+            if method in method_counts:
+                method_counts[method] += 1
+            else:
+                method_counts['unknown'] += 1
+    
+    # Process patch_iterations if they exist
+    patch_iterations = safe_get(record, 'patch_iterations', default=[])
+    if patch_iterations:
+        for iteration in patch_iterations:
+            for change in iteration.get('changes', []):
+                method = change.get('patch_method', 'unknown')
+                if method in method_counts:
+                    method_counts[method] += 1
+                else:
+                    method_counts['unknown'] += 1
+    
+    # Extract initial detection data
+    initial_run = safe_get(record, 'initial_run_by_tool', default={})
+    initial_bandit_vulns = safe_get(initial_run, 'bandit', 'identified_vulnerabilities', default=[])
+    initial_semgrep_vulns = safe_get(initial_run, 'semgrep', 'identified_vulnerabilities', default=[])
+    initial_custom_vulns = safe_get(initial_run, 'custom_detector', 'identified_vulnerabilities', default=[])
+    
+    # Extract iteration detection data
+    iterations = safe_get(record, 'iterations_by_tool', default={})
+    iter_bandit_vulns = safe_get(iterations, 'bandit', 'identified_vulnerabilities', default=[])
+    iter_semgrep_vulns = safe_get(iterations, 'semgrep', 'identified_vulnerabilities', default=[])
+    iter_custom_vulns = safe_get(iterations, 'custom_detector', 'identified_vulnerabilities', default=[])
+    
+    # Count iterations
+    patch_iterations = safe_get(record, 'patch_iterations', default=[])
+    iterations_count = len(patch_iterations) if isinstance(patch_iterations, list) else 0
+    
+    # Extract fixed and remaining CWEs
+    fixed_cwes = safe_get(record, 'fixed_cwe_ids', default=[])
+    remaining_cwes = safe_get(record, 'non_fixed_cwe_ids', default=[])
+    
+    # Build filtered record with only required fields
+    filtered = {
+        # Basic information
+        "workflow_id": safe_get(record, 'workflow_id', default=''),
+        "workflow": safe_get(record, 'workflow', default=''),
+        "timestamp": safe_get(record, 'timestamp', default=''),
+        "file": safe_get(record, 'file', default=''),
+        "source_file": safe_get(record, 'file', default=''),  # Using 'file' as source_file
+        
+        # Code content
+        "original_content": safe_get(record, 'original_content', default=''),
+        "llm_response": safe_get(record, 'response', default=''),
+        
+        # Vulnerability summary
+        "vulnerabilities_found": safe_get(record, 'vulnerabilities_found', default=0),
+        "total_vulnerabilities_identified": safe_get(record, 'total_vulnerabilities_identified', default=0),
+        "total_vulnerabilities_fixed": safe_get(record, 'total_vulnerabilities_fixed', default=0),
+        "total_vulnerabilities_remaining": safe_get(record, 'total_vulnerabilities_remaining', default=0),
+        
+        # Initial detection counts
+        "initial_detection_bandit_count": safe_get(initial_run, 'bandit', 'count', default=0),
+        "initial_detection_bandit_cwes": extract_cwes(initial_bandit_vulns),
+        "initial_detection_semgrep_count": safe_get(initial_run, 'semgrep', 'count', default=0),
+        "initial_detection_semgrep_cwes": extract_cwes(initial_semgrep_vulns),
+        "initial_detection_ast_count": safe_get(initial_run, 'custom_detector', 'count', default=0),
+        "initial_detection_ast_cwes": extract_cwes(initial_custom_vulns),
+        
+        # Iteration detection counts
+        "iteration_detection_bandit_count": safe_get(iterations, 'bandit', 'count', default=0),
+        "iteration_detection_bandit_cwes": extract_cwes(iter_bandit_vulns),
+        "iteration_detection_semgrep_count": safe_get(iterations, 'semgrep', 'count', default=0),
+        "iteration_detection_semgrep_cwes": extract_cwes(iter_semgrep_vulns),
+        "iteration_detection_ast_count": safe_get(iterations, 'custom_detector', 'count', default=0),
+        "iteration_detection_ast_cwes": extract_cwes(iter_custom_vulns),
+        
+        # Iteration and fix information
+        "iterations_count": iterations_count,
+        "fixed_cwes": fixed_cwes if isinstance(fixed_cwes, list) else [],
+        "remaining_cwes": remaining_cwes if isinstance(remaining_cwes, list) else [],
+        
+        # Fix providers
+        "fix_provider_llm": method_counts.get('llm-based', 0),
+        "fix_provider_rule_based": method_counts.get('rule-based', 0),
+        "fix_provider_unknown": method_counts.get('unknown', 0)
+    }
+    
+    return filtered
+
 class AuditManager:
     """
     Manages creation of audit records for each LLM interaction.
@@ -106,42 +239,10 @@ class AuditManager:
         if self.session_folder is None:
             self.get_session_folder()
 
-        # --- Ensure 'fixed_by' key is present in each tool section ---
-        def ensure_fixed_by(tool_dict, fix_technique_summary):
-            # Map each CWE to its specific fix technique if available
-            fixed_by = []
-            if tool_dict.get('identified_vulnerabilities'):
-                for v in tool_dict['identified_vulnerabilities']:
-                    cwe_id = v.get('cwe_id')
-                    fix_type = ''
-                    # If fix_technique_summary is a dict mapping CWE IDs to fix techniques
-                    if fix_technique_summary:
-                        # Try to get fix technique for this CWE
-                        if isinstance(fix_technique_summary, dict):
-                            fix_type = fix_technique_summary.get(str(cwe_id), '')
-                            # If not found, try as int
-                            if not fix_type and cwe_id is not None:
-                                fix_type = fix_technique_summary.get(int(cwe_id), '') if str(cwe_id).isdigit() else ''
-                        else:
-                            fix_type = str(fix_technique_summary)
-                    if not fix_type:
-                        fix_type = 'unknown'
-                    fixed_by.append({"cwe_id": cwe_id, "fix": fix_type})
-            tool_dict['fixed_by'] = fixed_by
-
-        fix_technique_summary = record.get('fix_technique_summary', {})
-        # Initial run
-        if 'initial_run_by_tool' in record:
-            for tool in record['initial_run_by_tool'].values():
-                if 'fixed_by' not in tool:
-                    ensure_fixed_by(tool, fix_technique_summary)
-        # Iterations
-        if 'iterations_by_tool' in record:
-            for tool in record['iterations_by_tool'].values():
-                if 'fixed_by' not in tool:
-                    ensure_fixed_by(tool, fix_technique_summary)
-
-        # Use audit_prefix format if specified (for dataset_prompt)
+        # Filter the record to include only required fields
+        filtered_record = filter_audit_record(record)
+        
+        # Determine filename
         if use_audit_prefix:
             ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             filename = f"audit_{ts}.json"
@@ -158,7 +259,7 @@ class AuditManager:
             # Atomic write: write to temp and then replace
             temp_path = path + ".tmp"
             with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(record, f, ensure_ascii=False, indent=2)
+                json.dump(filtered_record, f, ensure_ascii=False, indent=2)
             os.replace(temp_path, path)
         except Exception:
             pass

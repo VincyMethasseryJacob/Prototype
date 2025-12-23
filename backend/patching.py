@@ -81,43 +81,42 @@ class CodePatcher:
         for vuln in sorted_vulns:
             cwe_id = vuln.get('cwe_id')
             detection_method = vuln.get('detection_method', 'unknown')
-            
+            patch_method = None
+            patch_success = False
+            change_description = ''
             if cwe_id in self.patch_rules:
                 try:
                     result = self.patch_rules[cwe_id](patched_code, vuln)
-                    if result['success']:
+                    patch_method = 'rule-based'
+                    patch_success = result.get('success', False)
+                    change_description = result.get('description', '')
+                    if patch_success:
                         patched_code = result['patched_code']
-                        changes.append({
-                            'cwe_id': cwe_id,
-                            'cwe_name': vuln.get('cwe_name'),
-                            'line_number': vuln.get('line_number'),
-                            'change_description': result['description'],
-                            'detection_method': detection_method,
-                            'patch_method': 'rule-based'
-                        })
-                    else:
-                        unpatched_vulns.append(vuln)
                 except Exception as e:
-                    unpatched_vulns.append(vuln)
+                    patch_success = False
                     print(f"Error patching CWE-{cwe_id}: {e}")
             else:
                 # Try generic patching or LLM-based patching
                 if self.openai_client:
                     result = self._llm_based_patch(patched_code, vuln)
-                    if result['success']:
+                    patch_method = 'llm-based'
+                    patch_success = result.get('success', False)
+                    change_description = result.get('description', '')
+                    if patch_success:
                         patched_code = result['patched_code']
-                        changes.append({
-                            'cwe_id': cwe_id,
-                            'cwe_name': vuln.get('cwe_name'),
-                            'line_number': vuln.get('line_number'),
-                            'change_description': result['description'],
-                            'detection_method': detection_method,
-                            'patch_method': 'llm-based'
-                        })
-                    else:
-                        unpatched_vulns.append(vuln)
                 else:
-                    unpatched_vulns.append(vuln)
+                    patch_success = False
+            if patch_success:
+                changes.append({
+                    'cwe_id': cwe_id,
+                    'cwe_name': vuln.get('cwe_name'),
+                    'line_number': vuln.get('line_number'),
+                    'change_description': change_description,
+                    'detection_method': detection_method,
+                    'patch_method': patch_method if patch_method else 'unknown'
+                })
+            else:
+                unpatched_vulns.append(vuln)
         
         return {
             'patched_code': patched_code,
