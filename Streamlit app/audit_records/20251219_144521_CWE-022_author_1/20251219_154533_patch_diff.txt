@@ -1,0 +1,10 @@
+--- original.py+++ patched.py@@ -1,4 +1,10 @@+from flask_wtf import CSRFProtect
++from flask_wtf.csrf import csrf_protect
++
++csrf = CSRFProtect(app)
++
+ @app.route('/deleteImage', methods=['POST'])
++@csrf_protect
+ def deleteImage():
+     filename = request.form.get('filename')
+     if not filename or '/' in filename or '..' in filename:

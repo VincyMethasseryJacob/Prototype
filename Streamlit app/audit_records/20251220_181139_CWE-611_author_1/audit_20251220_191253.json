@@ -1,0 +1,43 @@
+{
+  "workflow_id": "20251220_191253",
+  "workflow": "dataset_prompt_analysis",
+  "timestamp": "2025-12-20T18:14:31.568140Z",
+  "file": "CWE-611/author_1.py",
+  "source_file": "CWE-611/author_1.py",
+  "original_content": "from flask import Flask, request\nimport lxml.etree\n\napp = Flask(__name__)\n\n\ndef checkPassword(userid, password):\n    pass\n\n\n@app.post(\"/upload\")\ndef upload():\n    '''\n    Get the xml file from the request and check if the userid and password are correct by invoking checkPassword().\n    '''",
+  "llm_response": "@app.post(\"/upload\")\ndef upload():\n    file = request.files.get('file')\n    if file is None:\n        return {\"error\": \"No file\"}, 400\n    try:\n        xml_bytes = file.read()\n        tree = lxml.etree.fromstring(xml_bytes)\n        userid = tree.findtext('userid')\n        password = tree.findtext('password')\n        if not userid or not password:\n            return {\"error\": \"Missing userid or password\"}, 400\n        if checkPassword(userid, password):\n            return {\"status\": \"ok\"}, 200\n        else:\n            return {\"status\": \"invalid credentials\"}, 401\n    except Exception:\n        return {\"error\": \"Failed to parse XML\"}, 400",
+  "vulnerabilities_found": 8,
+  "total_vulnerabilities_identified": 8,
+  "total_vulnerabilities_fixed": 8,
+  "total_vulnerabilities_remaining": 0,
+  "initial_detection_bandit_count": 0,
+  "initial_detection_bandit_cwes": [],
+  "initial_detection_semgrep_count": 0,
+  "initial_detection_semgrep_cwes": [],
+  "initial_detection_ast_count": 1,
+  "initial_detection_ast_cwes": [
+    "352"
+  ],
+  "iteration_detection_bandit_count": 1,
+  "iteration_detection_bandit_cwes": [
+    "259"
+  ],
+  "iteration_detection_semgrep_count": 1,
+  "iteration_detection_semgrep_cwes": [
+    "489"
+  ],
+  "iteration_detection_ast_count": 5,
+  "iteration_detection_ast_cwes": [
+    "352"
+  ],
+  "iterations_count": 5,
+  "fixed_cwes": [
+    "259",
+    "352",
+    "489"
+  ],
+  "remaining_cwes": [],
+  "fix_provider_llm": 7,
+  "fix_provider_rule_based": 1,
+  "fix_provider_unknown": 0
+}

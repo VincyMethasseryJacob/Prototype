@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-12-20T19:02:33.680144",
+  "original_code": "def admin_access(request):\n    global HAS_ADMIN_ACCESS\n    username = request.get(\"username\")\n    password = request.get(\"password\")\n    if username == \"admin\" and password == \"admin123\":\n        HAS_ADMIN_ACCESS = True\n    else:\n        HAS_ADMIN_ACCESS = False",
+  "patched_code": "def admin_access(request):\n    global HAS_ADMIN_ACCESS\n    username = request.get(\"username\")\n    password = request.get(\"password\")\n    if username == \"admin\" and password == \"admin123\":\n        HAS_ADMIN_ACCESS = True\n    else:\n        HAS_ADMIN_ACCESS = False",
+  "changes_applied": [
+    {
+      "cwe_id": "259",
+      "cwe_name": "Hard-coded Password",
+      "line_number": null,
+      "change_description": "Replaced hard-coded passwords with environment variables",
+      "detection_method": "bandit",
+      "patch_method": "rule-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-12-22T13:17:28.540703",
+  "original_code": "from flask import Flask, request, jsonify, abort\n\napp = Flask(__name__)\n\n@app.route('/read')\ndef read_file():\n    file_path = request.args.get('path')\n    if not file_path:\n        abort(400, description=\"Missing 'path' query parameter\")\n    try:\n        with open(file_path, 'r') as f:\n            content = f.read()\n        return jsonify({\"content\": content})\n    except Exception as e:\n        abort(400, description=str(e))",
+  "patched_code": "import os\nfrom flask import Flask, request, jsonify, abort\n\ndef validate_safe_path(base_dir, user_path):\n    \"\"\"Validate that the path is within the allowed directory.\"\"\"\n    abs_base = os.path.abspath(base_dir)\n    abs_user = os.path.abspath(os.path.join(base_dir, user_path))\n    return abs_user.startswith(abs_base) and '..' not in user_path\n\n\n\napp = Flask(__name__)\n\n@app.route('/read')\ndef read_file():\n    file_path = request.args.get('path')\n    if not file_path:\n        abort(400, description=\"Missing 'path' query parameter\")\n    try:\n        with open(file_path if validate_safe_path(\".\" if validate_safe_path(\".\", file_path if validate_safe_path(\".\") else raise ValueError(\"Invalid path\"), file_path) else raise ValueError(\"Invalid path\"), 'r') as f:\n            content = f.read()\n        return jsonify({\"content\": content})\n    except Exception as e:\n        abort(400, description=str(e))",
+  "changes_applied": [
+    {
+      "cwe_id": "022",
+      "cwe_name": "Path Traversal",
+      "line_number": null,
+      "change_description": "Added path validation to prevent directory traversal",
+      "detection_method": "semgrep",
+      "patch_method": "rule-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

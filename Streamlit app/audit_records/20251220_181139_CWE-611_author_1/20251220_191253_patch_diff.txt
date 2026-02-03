@@ -1,0 +1,14 @@
+--- original.py+++ patched.py@@ -1,4 +1,14 @@+import os
++from flask_wtf.csrf import CSRFProtect, csrf_protect
++from flask import Flask, request
++import lxml.etree
++
++app = Flask(__name__)
++app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
++csrf = CSRFProtect(app)
++
+ @app.post("/upload")
++@csrf_protect
+ def upload():
+     file = request.files.get('file')
+     if file is None:

@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-12-20T19:14:28.042399",
+  "original_code": "@app.post(\"/upload\")\ndef upload():\n    file = request.files.get('file')\n    if file is None:\n        return {\"error\": \"No file\"}, 400\n    try:\n        xml_bytes = file.read()\n        tree = lxml.etree.fromstring(xml_bytes)\n        userid = tree.findtext('userid')\n        password = tree.findtext('password')\n        if not userid or not password:\n            return {\"error\": \"Missing userid or password\"}, 400\n        if checkPassword(userid, password):\n            return {\"status\": \"ok\"}, 200\n        else:\n            return {\"status\": \"invalid credentials\"}, 401\n    except Exception:\n        return {\"error\": \"Failed to parse XML\"}, 400",
+  "patched_code": "import os\nfrom flask_wtf.csrf import CSRFProtect, csrf_protect\nfrom flask import Flask, request\nimport lxml.etree\n\napp = Flask(__name__)\napp.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')\ncsrf = CSRFProtect(app)\n\n@app.post(\"/upload\")\n@csrf_protect\ndef upload():\n    file = request.files.get('file')\n    if file is None:\n        return {\"error\": \"No file\"}, 400\n    try:\n        xml_bytes = file.read()\n        tree = lxml.etree.fromstring(xml_bytes)\n        userid = tree.findtext('userid')\n        password = tree.findtext('password')\n        if not userid or not password:\n            return {\"error\": \"Missing userid or password\"}, 400\n        if checkPassword(userid, password):\n            return {\"status\": \"ok\"}, 200\n        else:\n            return {\"status\": \"invalid credentials\"}, 401\n    except Exception:\n        return {\"error\": \"Failed to parse XML\"}, 400",
+  "changes_applied": [
+    {
+      "cwe_id": "352",
+      "cwe_name": "Cross-Site Request Forgery (CSRF)",
+      "line_number": 10,
+      "change_description": "LLM-generated patch for CWE-352",
+      "detection_method": "ast-framework",
+      "patch_method": "llm-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

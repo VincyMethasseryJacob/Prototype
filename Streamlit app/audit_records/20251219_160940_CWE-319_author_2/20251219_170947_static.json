@@ -1,0 +1,84 @@
+{
+  "timestamp": "2025-12-19T17:11:01.868364",
+  "bandit_analysis": {
+    "success": true,
+    "issues": [
+      {
+        "test_id": "B321",
+        "test_name": "blacklist",
+        "severity": "HIGH",
+        "confidence": "HIGH",
+        "cwe_id": 319,
+        "line_number": 2,
+        "code": "1 def downloadFile(hostname, username, password, sensitive_file):\n2     with ftplib.FTP(hostname) as ftp:\n3         ftp.login(user=username, passwd=password)\n",
+        "description": "FTP-related functions are being called. FTP is considered insecure. Use SSH/SFTP/SCP or some other encrypted protocol.",
+        "more_info": "https://bandit.readthedocs.io/en/1.8.6/blacklists/blacklist_calls.html#b321-ftplib"
+      }
+    ],
+    "summary": {
+      "total_issues": 0,
+      "severity_breakdown": {
+        "HIGH": 1,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNDEFINED": 0
+      },
+      "confidence_breakdown": {
+        "HIGH": 1,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNDEFINED": 0
+      },
+      "files_analyzed": 2
+    }
+  },
+  "secondary_tool_analysis": {
+    "success": true,
+    "issues": [
+      {
+        "check_id": "python.lang.security.audit.insecure-transport.ftplib.use-ftp-tls.use-ftp-tls",
+        "path": "C:\\Users\\vinz9\\AppData\\Local\\Temp\\tmpw3zwbmss.py",
+        "start": {
+          "line": 2,
+          "col": 10,
+          "offset": 74
+        },
+        "end": {
+          "line": 2,
+          "col": 30,
+          "offset": 94
+        },
+        "severity": "LOW",
+        "message": "The 'FTP' class sends information unencrypted. Consider using the 'FTP_TLS' class instead.",
+        "cwe_id": "319"
+      }
+    ],
+    "summary": {
+      "total_issues": 1,
+      "severity_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 1
+      }
+    }
+  },
+  "comparison": {
+    "bandit_total": 1,
+    "secondary_total": 1,
+    "bandit_unique_cwes": 1,
+    "secondary_unique_cwes": 1,
+    "overlapping_lines": 1,
+    "overlapping_cwes": 0,
+    "bandit_only_lines": 0,
+    "secondary_only_lines": 0,
+    "bandit_only_cwes": 1,
+    "secondary_only_cwes": 1,
+    "bandit_severity": {
+      "HIGH": 1,
+      "MEDIUM": 0,
+      "LOW": 0,
+      "UNDEFINED": 0
+    },
+    "secondary_types": {}
+  }
+}

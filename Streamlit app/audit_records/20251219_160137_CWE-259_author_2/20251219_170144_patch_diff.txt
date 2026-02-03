@@ -1,0 +1,9 @@
+--- original.py+++ patched.py@@ -1,7 +1,8 @@+import os
+ def getConnection():
+     return mysql.connector.connect(
+         host="localhost",
+         user="your_username",
+-        password="your_password",
++        password = os.getenv("DB_PASSWORD"),
+         database="your_database"
+     )

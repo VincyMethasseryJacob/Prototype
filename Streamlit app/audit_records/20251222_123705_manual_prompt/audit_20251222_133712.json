@@ -1,0 +1,45 @@
+{
+  "workflow_id": "20251222_133712",
+  "workflow": "new_prompt_analysis",
+  "timestamp": "2025-12-22T12:38:29.074168Z",
+  "file": "",
+  "source_file": "",
+  "original_content": "",
+  "llm_response": "import subprocess\n\ndef run_program(program_name, *args):\n    return subprocess.run([program_name] + list(args), capture_output=True, text=True)",
+  "vulnerabilities_found": 28,
+  "total_vulnerabilities_identified": 28,
+  "total_vulnerabilities_fixed": 26,
+  "total_vulnerabilities_remaining": 2,
+  "initial_detection_bandit_count": 2,
+  "initial_detection_bandit_cwes": [
+    "078"
+  ],
+  "initial_detection_semgrep_count": 0,
+  "initial_detection_semgrep_cwes": [],
+  "initial_detection_ast_count": 2,
+  "initial_detection_ast_cwes": [
+    "078",
+    "252"
+  ],
+  "iteration_detection_bandit_count": 12,
+  "iteration_detection_bandit_cwes": [
+    "078"
+  ],
+  "iteration_detection_semgrep_count": 0,
+  "iteration_detection_semgrep_cwes": [],
+  "iteration_detection_ast_count": 12,
+  "iteration_detection_ast_cwes": [
+    "078",
+    "252"
+  ],
+  "iterations_count": 6,
+  "fixed_cwes": [
+    "252"
+  ],
+  "remaining_cwes": [
+    "078"
+  ],
+  "fix_provider_llm": 0,
+  "fix_provider_rule_based": 26,
+  "fix_provider_unknown": 0
+}

@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-12-20T21:41:52.037221",
+  "original_code": "def getDBConnection():\n    return mysql.connector.connect(\n        host='localhost',\n        user='your_username',\n        password='your_password',\n        database='your_database'\n    )",
+  "patched_code": "import os\ndef getDBConnection():\n    return mysql.connector.connect(\n        host='localhost',\n        user='your_username',\n        password = os.getenv(\"DB_PASSWORD\"),\n        database='your_database'\n    )",
+  "changes_applied": [
+    {
+      "cwe_id": "259",
+      "cwe_name": "Hard-coded Password",
+      "line_number": null,
+      "change_description": "Replaced hard-coded passwords with environment variables",
+      "detection_method": "bandit",
+      "patch_method": "rule-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

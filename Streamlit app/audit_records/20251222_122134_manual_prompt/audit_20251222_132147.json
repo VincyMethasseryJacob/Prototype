@@ -1,0 +1,37 @@
+{
+  "workflow_id": "20251222_132147",
+  "workflow": "new_prompt_analysis",
+  "timestamp": "2025-12-22T12:23:07.676863Z",
+  "file": "",
+  "source_file": "",
+  "original_content": "",
+  "llm_response": "import xml.etree.ElementTree as ET\n\ndef parse_xml_string(xml_string):\n    return ET.fromstring(xml_string)",
+  "vulnerabilities_found": 14,
+  "total_vulnerabilities_identified": 14,
+  "total_vulnerabilities_fixed": 12,
+  "total_vulnerabilities_remaining": 2,
+  "initial_detection_bandit_count": 2,
+  "initial_detection_bandit_cwes": [
+    "020"
+  ],
+  "initial_detection_semgrep_count": 0,
+  "initial_detection_semgrep_cwes": [],
+  "initial_detection_ast_count": 0,
+  "initial_detection_ast_cwes": [],
+  "iteration_detection_bandit_count": 12,
+  "iteration_detection_bandit_cwes": [
+    "020"
+  ],
+  "iteration_detection_semgrep_count": 0,
+  "iteration_detection_semgrep_cwes": [],
+  "iteration_detection_ast_count": 0,
+  "iteration_detection_ast_cwes": [],
+  "iterations_count": 6,
+  "fixed_cwes": [],
+  "remaining_cwes": [
+    "020"
+  ],
+  "fix_provider_llm": 0,
+  "fix_provider_rule_based": 12,
+  "fix_provider_unknown": 0
+}

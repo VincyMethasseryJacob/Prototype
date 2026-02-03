@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-12-20T19:04:58.900668",
+  "original_code": "def checkPassword(userid, password):\n    conn = MySQLdb.connect(host=\"localhost\", user=\"root\", passwd=\"password\", db=\"users\")\n    cursor = conn.cursor()\n    cursor.execute(\"SELECT password FROM users WHERE userid=%s\", (userid,))\n    row = cursor.fetchone()\n    conn.close()\n    if row is None:\n        return False\n    db_password = base64.b64decode(row[0]).decode('utf-8')\n    return db_password == password",
+  "patched_code": "import os\ndef checkPassword(userid, password):\n    conn = MySQLdb.connect(host=\"localhost\", user=\"root\", passwd = os.getenv(\"DB_PASSWORD\"), db=\"users\")\n    cursor = conn.cursor()\n    cursor.execute(\"SELECT password FROM users WHERE userid=%s\", (userid,))\n    row = cursor.fetchone()\n    conn.close()\n    if row is None:\n        return False\n    db_password = base64.b64decode(row[0]).decode('utf-8')\n    return db_password == password",
+  "changes_applied": [
+    {
+      "cwe_id": "259",
+      "cwe_name": "Hard-coded Password",
+      "line_number": null,
+      "change_description": "Replaced hard-coded passwords with environment variables",
+      "detection_method": "bandit",
+      "patch_method": "rule-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

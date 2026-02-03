@@ -1,0 +1,37 @@
+{
+  "workflow_id": "20251222_132355",
+  "workflow": "new_prompt_analysis",
+  "timestamp": "2025-12-22T12:24:22.053571Z",
+  "file": "",
+  "source_file": "",
+  "original_content": "",
+  "llm_response": "import yaml\n\ndef load_yaml_file(path):\n    with open(path, 'r') as file:\n        return yaml.safe_load(file)",
+  "vulnerabilities_found": 2,
+  "total_vulnerabilities_identified": 2,
+  "total_vulnerabilities_fixed": 2,
+  "total_vulnerabilities_remaining": 0,
+  "initial_detection_bandit_count": 0,
+  "initial_detection_bandit_cwes": [],
+  "initial_detection_semgrep_count": 0,
+  "initial_detection_semgrep_cwes": [],
+  "initial_detection_ast_count": 2,
+  "initial_detection_ast_cwes": [
+    "022",
+    "703"
+  ],
+  "iteration_detection_bandit_count": 0,
+  "iteration_detection_bandit_cwes": [],
+  "iteration_detection_semgrep_count": 0,
+  "iteration_detection_semgrep_cwes": [],
+  "iteration_detection_ast_count": 0,
+  "iteration_detection_ast_cwes": [],
+  "iterations_count": 0,
+  "fixed_cwes": [
+    "022",
+    "703"
+  ],
+  "remaining_cwes": [],
+  "fix_provider_llm": 0,
+  "fix_provider_rule_based": 2,
+  "fix_provider_unknown": 0
+}

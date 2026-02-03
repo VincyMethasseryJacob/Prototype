@@ -1,0 +1,55 @@
+{
+  "workflow_id": "20251222_134433",
+  "workflow": "new_prompt_analysis",
+  "timestamp": "2025-12-22T12:46:45.171865Z",
+  "file": "",
+  "source_file": "",
+  "original_content": "",
+  "llm_response": "from flask import Flask, request, redirect, url_for\nimport os\n\napp = Flask(__name__)\nUPLOAD_FOLDER = 'uploads'\nos.makedirs(UPLOAD_FOLDER, exist_ok=True)\napp.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER\n\n@app.route('/upload', methods=['GET', 'POST'])\ndef upload_file():\n    if request.method == 'POST':\n        if 'file' not in request.files:\n            return 'No file part', 400\n        file = request.files['file']\n        if file.filename == '':\n            return 'No selected file', 400\n        filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)\n        file.save(filepath)\n        return 'File uploaded successfully'\n    return '''\n    <!doctype html>\n    <title>Upload File</title>\n    <h1>Upload new File</h1>\n    <form method=post enctype=multipart/form-data>\n      <input type=file name=file>\n      <input type=submit value=Upload>\n    </form>\n    '''\n\nif __name__ == '__main__':\n    app.run(debug=True)",
+  "vulnerabilities_found": 15,
+  "total_vulnerabilities_identified": 15,
+  "total_vulnerabilities_fixed": 15,
+  "total_vulnerabilities_remaining": 0,
+  "initial_detection_bandit_count": 1,
+  "initial_detection_bandit_cwes": [
+    "094"
+  ],
+  "initial_detection_semgrep_count": 1,
+  "initial_detection_semgrep_cwes": [
+    "489"
+  ],
+  "initial_detection_ast_count": 1,
+  "initial_detection_ast_cwes": [
+    "352"
+  ],
+  "iteration_detection_bandit_count": 2,
+  "iteration_detection_bandit_cwes": [
+    "094",
+    "259"
+  ],
+  "iteration_detection_semgrep_count": 2,
+  "iteration_detection_semgrep_cwes": [
+    "079",
+    "489"
+  ],
+  "iteration_detection_ast_count": 8,
+  "iteration_detection_ast_cwes": [
+    "1004",
+    "285",
+    "352"
+  ],
+  "iterations_count": 2,
+  "fixed_cwes": [
+    "079",
+    "094",
+    "1004",
+    "259",
+    "285",
+    "352",
+    "489"
+  ],
+  "remaining_cwes": [],
+  "fix_provider_llm": 11,
+  "fix_provider_rule_based": 1,
+  "fix_provider_unknown": 0
+}

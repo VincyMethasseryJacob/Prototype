@@ -1,0 +1,72 @@
+{
+  "timestamp": "2025-12-22T13:12:46.855464",
+  "bandit_analysis": {
+    "success": true,
+    "issues": [],
+    "summary": {
+      "total_issues": 0,
+      "severity_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNDEFINED": 0
+      },
+      "confidence_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNDEFINED": 0
+      },
+      "files_analyzed": 2
+    }
+  },
+  "secondary_tool_analysis": {
+    "success": true,
+    "issues": [
+      {
+        "check_id": "python.lang.security.audit.subprocess-shell-true.subprocess-shell-true",
+        "path": "C:\\Users\\vinz9\\AppData\\Local\\Temp\\tmpfgwslz_8.py",
+        "start": {
+          "line": 10,
+          "col": 37,
+          "offset": 518
+        },
+        "end": {
+          "line": 10,
+          "col": 41,
+          "offset": 522
+        },
+        "severity": "HIGH",
+        "message": "Found 'subprocess' function 'Popen' with 'shell=True'. This is dangerous because this call will spawn the command using a shell process. Doing so propagates current shell settings and variables, which makes it much easier for a malicious actor to execute commands. Use 'shell=False' instead.",
+        "cwe_id": "78"
+      }
+    ],
+    "summary": {
+      "total_issues": 1,
+      "severity_breakdown": {
+        "HIGH": 1,
+        "MEDIUM": 0,
+        "LOW": 0
+      }
+    }
+  },
+  "comparison": {
+    "bandit_total": 0,
+    "secondary_total": 1,
+    "bandit_unique_cwes": 0,
+    "secondary_unique_cwes": 1,
+    "overlapping_lines": 0,
+    "overlapping_cwes": 0,
+    "bandit_only_lines": 0,
+    "secondary_only_lines": 1,
+    "bandit_only_cwes": 0,
+    "secondary_only_cwes": 1,
+    "bandit_severity": {
+      "HIGH": 0,
+      "MEDIUM": 0,
+      "LOW": 0,
+      "UNDEFINED": 0
+    },
+    "secondary_types": {}
+  }
+}

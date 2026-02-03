@@ -1,0 +1,30 @@
+{
+  "timestamp": "2025-12-22T13:51:43.391934",
+  "original_code": "import socket\n\nport = int(input(\"Enter port number: \"))\nhost = \"0.0.0.0\"\n\nserver_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\nserver_socket.bind((host, port))\nserver_socket.listen(5)\n\n\nconn, addr = server_socket.accept()\n\n\nconn.close()\nserver_socket.close()",
+  "patched_code": "\n# SECURITY: Proper socket configuration\n# - Use unique ports or proper port management\n# - Set SO_REUSEADDR carefully\n# - Validate port availability before binding\n\nimport socket\n\nport = int(input(\"Enter port number: \"))\nhost = \"0.0.0.0\"\n\nserver_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n    # sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Use with caution\n    # sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Use with caution\n    # sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Use with caution\n    # sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Use with caution\n    # sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Use with caution\n    # sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Use with caution\nserver_socket.bind((host, port))\nserver_socket.listen(5)\n\n\nconn, addr = server_socket.accept()\n\n\nconn.close()\nserver_socket.close()",
+  "changes_applied": [
+    {
+      "cwe_id": "605",
+      "cwe_name": "Multiple Binds",
+      "line_number": null,
+      "change_description": "Added socket configuration guidance",
+      "detection_method": "bandit",
+      "patch_method": "rule-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [
+    {
+      "cwe_id": "200",
+      "cwe_name": "Information Exposure",
+      "severity": "LOW",
+      "confidence": "MEDIUM",
+      "line": 11,
+      "snippet": "",
+      "description": "Running `socket.bind` to 0.0.0.0, or empty string could unexpectedly expose the server publicly as it binds to all available interfaces. Consider instead getting correct address from an environment variable or configuration file.",
+      "explanation": "Semgrep python.lang.security.audit.network.bind.avoid-bind-to-all-interfaces: Running `socket.bind` to 0.0.0.0, or empty string could unexpectedly expose the server publicly as it binds to all available interfaces. Consider instead getting correct address from an environment variable or configuration file.",
+      "source": "semgrep",
+      "detection_method": "semgrep"
+    }
+  ],
+  "patch_success_rate": 0.5
+}

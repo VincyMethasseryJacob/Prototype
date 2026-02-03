@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-12-20T18:54:56.571077",
+  "original_code": "def generateRandomString(length):\n    return ''.join(random.choices(string.ascii_letters, k=length))",
+  "patched_code": "def generateRandomString(length):\n    return ''.join(random.choices(string.ascii_letters, k=length))",
+  "changes_applied": [
+    {
+      "cwe_id": "330",
+      "cwe_name": "Weak Random",
+      "line_number": null,
+      "change_description": "Replaced weak random with cryptographically secure random (secrets module)",
+      "detection_method": "bandit",
+      "patch_method": "rule-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

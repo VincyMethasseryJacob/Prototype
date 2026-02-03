@@ -1,0 +1,41 @@
+{
+  "timestamp": "2025-12-22T13:41:05.500853",
+  "original_code": "from Crypto.Cipher import AES\nfrom Crypto.Util.Padding import pad\nimport base64\n\ndef aes_cbc_encrypt(key: bytes, data: bytes) -> bytes:\n    iv = b'\\x00' * 16\n    cipher = AES.new(key, AES.MODE_CBC, iv)\n    ct = cipher.encrypt(pad(data, AES.block_size))\n    return ct",
+  "patched_code": "from Cryptodome.Cipher import AES\nfrom Cryptodome.Util.Padding import pad\nfrom Cryptodome.Random import get_random_bytes\nfrom Cryptodome.Protocol.KDF import PBKDF2\nfrom Cryptodome.Hash import SHA256\nfrom Cryptodome.Protocol.KDF import HKDF\n\ndef aes_gcm_encrypt(password: str, data: bytes) -> bytes:\n    salt = get_random_bytes(16)\n    # Derive a strong key using HKDF based on PBKDF2 output\n    pbkdf2_key = PBKDF2(password, salt, dkLen=32, count=200000, hmac_hash_module=SHA256)\n    key = HKDF(master=pbkdf2_key, key_len=32, salt=salt, hashmod=SHA256)\n    cipher = AES.new(key, AES.MODE_GCM)\n    ciphertext, tag = cipher.encrypt_and_digest(data)\n    return salt + cipher.nonce + tag + ciphertext",
+  "changes_applied": [
+    {
+      "cwe_id": "327",
+      "cwe_name": "Unknown Vulnerability",
+      "line_number": null,
+      "change_description": "LLM-generated patch for CWE-327",
+      "detection_method": "bandit",
+      "patch_method": "llm-based"
+    },
+    {
+      "cwe_id": "327",
+      "cwe_name": "Unknown Vulnerability",
+      "line_number": null,
+      "change_description": "LLM-generated patch for CWE-327",
+      "detection_method": "bandit",
+      "patch_method": "llm-based"
+    },
+    {
+      "cwe_id": "327",
+      "cwe_name": "Unknown Vulnerability",
+      "line_number": null,
+      "change_description": "LLM-generated patch for CWE-327",
+      "detection_method": "bandit",
+      "patch_method": "llm-based"
+    },
+    {
+      "cwe_id": "327",
+      "cwe_name": "Unknown Vulnerability",
+      "line_number": null,
+      "change_description": "LLM-generated patch for CWE-327",
+      "detection_method": "bandit",
+      "patch_method": "llm-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

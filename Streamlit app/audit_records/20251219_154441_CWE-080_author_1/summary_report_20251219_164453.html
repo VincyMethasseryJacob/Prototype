@@ -1,0 +1,189 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vulnerability Analysis Report</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #34495e; margin-top: 30px; border-bottom: 2px solid #ecf0f1; padding-bottom: 5px; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 20px; background: white; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #3498db; color: white; font-weight: 600; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        tr:hover { background-color: #e8f4f8; }
+        .high { color: #e74c3c; font-weight: bold; }
+        .medium { color: #f39c12; font-weight: bold; }
+        .low { color: #27ae60; font-weight: bold; }
+        .summary-flex { display: flex; justify-content: space-between; gap: 40px; margin-bottom: 20px; }
+        .summary-col { flex: 1; background: #f3f6fa; border-radius: 10px; padding: 20px; }
+        .summary-col h3 { margin-top: 0; color: #2c3e50; font-size: 18px; }
+        .summary-total { text-align: center; margin: 20px 0; font-size: 20px; font-weight: bold; color: #764ba2; }
+        .metric { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; margin: 15px 0; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .metric p { margin: 8px 0; font-size: 16px; }
+        .metric strong { font-weight: 600; }
+        .code-section { margin: 20px 0; }
+        .code-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 15px; }
+        .code-box { background: #2d2d2d; color: #f8f8f2; padding: 20px; border-radius: 8px; overflow-x: auto; }
+        .code-box h3 { color: #f8f8f2; margin-top: 0; padding-bottom: 10px; border-bottom: 2px solid #555; }
+        .code-box pre { margin: 0; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+        .severity-dist { display: flex; gap: 15px; margin: 20px 0; }
+        .severity-card { flex: 1; padding: 15px; border-radius: 8px; text-align: center; color: white; }
+        .severity-card.high { background: #e74c3c; }
+        .severity-card.medium { background: #f39c12; }
+        .severity-card.low { background: #27ae60; }
+        .severity-card .count { font-size: 32px; font-weight: bold; }
+        .severity-card .label { font-size: 14px; opacity: 0.9; margin-top: 5px; }
+        .timestamp { color: #7f8c8d; font-size: 14px; }
+        .success-badge { background: #27ae60; color: white; padding: 5px 15px; border-radius: 20px; display: inline-block; font-weight: bold; }
+        .warning-badge { background: #f39c12; color: white; padding: 5px 15px; border-radius: 20px; display: inline-block; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔒 LLM Code Vulnerability Analysis Report</h1>
+        <p class="timestamp">Generated: 2025-12-19 16:45:45</p>
+
+        <h2>Executive Summary</h2>
+        <div class="summary-flex">
+            <div class="summary-col">
+                <h3>Iteration Process</h3>
+                <p>Total vulnerabilities custom detector found: <strong>1</strong></p>
+                <p>Total Bandit found: <strong>0</strong></p>
+                <p>Total Semgrep found: <strong>3</strong></p>
+            </div>
+            <div class="summary-col">
+                <h3>Initial Process</h3>
+                <p>Total vulnerabilities custom detector found: <strong>1</strong></p>
+                <p>Total Bandit found: <strong>0</strong></p>
+                <p>Total Semgrep found: <strong>1</strong></p>
+            </div>
+        </div>
+        <div class="summary-total">
+            Total found in all processes by all tools: <span style="color:#e67e22">6</span>
+        </div>
+
+        <h2>Detected Vulnerabilities</h2>
+        <table>
+            <tr>
+                <th>CWE ID</th>
+                <th>CWE Name</th>
+                <th>Severity</th>
+                <th>Line</th>
+                <th>Description</th>
+                <th>Detection Method</th>
+            </tr>
+            
+        <tr>
+            <td>080</td>
+            <td>Improper Neutralization of Script-Related HTML Tags (Basic XSS)</td>
+            <td class="medium">MEDIUM</td>
+            <td>5</td>
+            <td>XSS via HTTP response: Tainted data flows into make_response()</td>
+            <td>ast-taint</td>
+        </tr>
+
+        <tr>
+            <td>079</td>
+            <td>Cross-Site Scripting (XSS)</td>
+            <td class="medium">MEDIUM</td>
+            <td>4</td>
+            <td>Detected user input flowing into a manually constructed HTML string. You may be accidentally bypassing secure methods of rendering HTML by manually constructing HTML and this could create a cross-site scripting vulnerability, which could let attackers steal sensitive user data. To be sure this is safe, check that the HTML is rendered safely. Otherwise, use templates (`django.shortcuts.render`) which will safely render HTML instead.</td>
+            <td>semgrep</td>
+        </tr>
+
+        <tr>
+            <td>080</td>
+            <td>Improper Neutralization of Script-Related HTML Tags (Basic XSS)</td>
+            <td class="medium">MEDIUM</td>
+            <td>6</td>
+            <td>XSS via HTTP response: Tainted data flows into make_response()</td>
+            <td>ast-taint</td>
+        </tr>
+
+        <tr>
+            <td>079</td>
+            <td>Cross-Site Scripting (XSS)</td>
+            <td class="medium">MEDIUM</td>
+            <td>5</td>
+            <td>Detected user input flowing into a manually constructed HTML string. You may be accidentally bypassing secure methods of rendering HTML by manually constructing HTML and this could create a cross-site scripting vulnerability, which could let attackers steal sensitive user data. To be sure this is safe, check that the HTML is rendered safely. Otherwise, use templates (`django.shortcuts.render`) which will safely render HTML instead.</td>
+            <td>semgrep</td>
+        </tr>
+
+        <tr>
+            <td>079</td>
+            <td>Cross-Site Scripting (XSS)</td>
+            <td class="medium">MEDIUM</td>
+            <td>7</td>
+            <td>Be careful with `flask.make_response()`. If this response is rendered onto a webpage, this could create a cross-site scripting (XSS) vulnerability. `flask.make_response()` will not autoescape HTML. If you are rendering HTML, write your HTML in a template file and use `flask.render_template()` which will take care of escaping. If you are returning data from an API, consider using `flask.jsonify()`.</td>
+            <td>semgrep</td>
+        </tr>
+
+        <tr>
+            <td>096</td>
+            <td>Unknown Vulnerability</td>
+            <td class="medium">MEDIUM</td>
+            <td>7</td>
+            <td>Found a template created with string formatting. This is susceptible to server-side template injection and cross-site scripting attacks.</td>
+            <td>semgrep</td>
+        </tr>
+
+        </table>
+
+        <h2>Severity Distribution</h2>
+        <div class="severity-dist">
+            
+            <div class="severity-card high">
+                <div class="count">0</div>
+                <div class="label">HIGH</div>
+            </div>
+            
+            <div class="severity-card medium">
+                <div class="count">6</div>
+                <div class="label">MEDIUM</div>
+            </div>
+            
+            <div class="severity-card low">
+                <div class="count">0</div>
+                <div class="label">LOW</div>
+            </div>
+            
+        </div>
+
+        <h2>Code Analysis</h2>
+        <div class="code-section">
+            <div class="code-container">
+                <div class="code-box">
+                    <h3>📝 Original Code (With Vulnerabilities)</h3>
+                    <pre>@app.route(&quot;/renderHtml&quot;)
+def renderHTML():
+    name = request.args.get(&quot;name&quot;, &quot;World&quot;)
+    html_content = f&quot;&lt;html&gt;&lt;body&gt;&lt;h1&gt;Hello {name}&lt;/h1&gt;&lt;/body&gt;&lt;/html&gt;&quot;
+    response = make_response(html_content)
+    response.headers[&quot;Content-Type&quot;] = &quot;text/html&quot;
+    return response</pre>
+                </div>
+                <div class="code-box">
+                    <h3>✅ Patched Code (Vulnerabilities Fixed)</h3>
+                    <pre>from flask import render_template, request, escape
+
+@app.route(&quot;/renderHtml&quot;)
+def renderHTML():
+    name = request.args.get(&quot;name&quot;, &quot;World&quot;)
+    safe_name = escape(name)
+    return render_template(&quot;greeting.html&quot;, name=safe_name)
+```
+
+```html
+&lt;html&gt;&lt;body&gt;&lt;h1&gt;Hello {{ name|safe }}&lt;/h1&gt;&lt;/body&gt;&lt;/html&gt;</pre>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #ecf0f1; color: #7f8c8d; font-size: 12px;">
+            <p>Generated by LLM-CVAM Framework - Code Vulnerability Analysis and Mitigation System</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-12-19T15:46:27.469831",
+  "original_code": "@app.route('/deleteImage', methods=['POST'])\ndef deleteImage():\n    filename = request.form.get('filename')\n    if not filename or '/' in filename or '..' in filename:\n        return {'status': 'error', 'message': 'Invalid filename'}, 400\n\n    folder = os.path.join(os.getcwd(), 'images')\n    filepath = os.path.join(folder, filename)\n\n    if not os.path.exists(filepath):\n        return {'status': 'error', 'message': 'File does not exist'}, 404\n\n    try:\n        os.remove(filepath)\n        return {'status': 'success', 'message': 'File deleted'}\n    except Exception as e:\n        return {'status': 'error', 'message': str(e)}, 500",
+  "patched_code": "from flask_wtf import CSRFProtect\nfrom flask_wtf.csrf import csrf_protect\n\ncsrf = CSRFProtect(app)\n\n@app.route('/deleteImage', methods=['POST'])\n@csrf_protect\ndef deleteImage():\n    filename = request.form.get('filename')\n    if not filename or '/' in filename or '..' in filename:\n        return {'status': 'error', 'message': 'Invalid filename'}, 400\n\n    folder = os.path.join(os.getcwd(), 'images')\n    filepath = os.path.join(folder, filename)\n\n    if not os.path.exists(filepath):\n        return {'status': 'error', 'message': 'File does not exist'}, 404\n\n    try:\n        os.remove(filepath)\n        return {'status': 'success', 'message': 'File deleted'}\n    except Exception as e:\n        return {'status': 'error', 'message': str(e)}, 500",
+  "changes_applied": [
+    {
+      "cwe_id": "352",
+      "cwe_name": "Cross-Site Request Forgery (CSRF)",
+      "line_number": 6,
+      "change_description": "LLM-generated patch for CWE-352",
+      "detection_method": "ast-framework",
+      "patch_method": "llm-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

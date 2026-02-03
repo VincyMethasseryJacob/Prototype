@@ -1,0 +1,66 @@
+{
+  "timestamp": "2025-12-20T19:02:33.682146",
+  "bandit_analysis": {
+    "success": true,
+    "issues": [
+      {
+        "test_id": "B105",
+        "test_name": "hardcoded_password_string",
+        "severity": "LOW",
+        "confidence": "MEDIUM",
+        "cwe_id": 259,
+        "line_number": 5,
+        "code": "4     password = request.get(\"password\")\n5     if username == \"admin\" and password == \"admin123\":\n6         HAS_ADMIN_ACCESS = True\n",
+        "description": "Possible hardcoded password: 'admin123'",
+        "more_info": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html"
+      }
+    ],
+    "summary": {
+      "total_issues": 0,
+      "severity_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 1,
+        "UNDEFINED": 0
+      },
+      "confidence_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 1,
+        "LOW": 0,
+        "UNDEFINED": 0
+      },
+      "files_analyzed": 2
+    }
+  },
+  "secondary_tool_analysis": {
+    "success": true,
+    "issues": [],
+    "summary": {
+      "total_issues": 0,
+      "severity_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0
+      }
+    }
+  },
+  "comparison": {
+    "bandit_total": 1,
+    "secondary_total": 0,
+    "bandit_unique_cwes": 1,
+    "secondary_unique_cwes": 0,
+    "overlapping_lines": 0,
+    "overlapping_cwes": 0,
+    "bandit_only_lines": 1,
+    "secondary_only_lines": 0,
+    "bandit_only_cwes": 1,
+    "secondary_only_cwes": 0,
+    "bandit_severity": {
+      "HIGH": 0,
+      "MEDIUM": 0,
+      "LOW": 1,
+      "UNDEFINED": 0
+    },
+    "secondary_types": {}
+  }
+}

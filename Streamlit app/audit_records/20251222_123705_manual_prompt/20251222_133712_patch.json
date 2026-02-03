@@ -1,0 +1,41 @@
+{
+  "timestamp": "2025-12-22T13:38:25.931731",
+  "original_code": "import subprocess\n\ndef run_program(program_name, *args):\n    return subprocess.run([program_name] + list(args), capture_output=True, text=True)",
+  "patched_code": "\n# SECURITY: Always check return values from security-critical operations\n# Example:\n# result = critical_operation()\n# if result is None or result < 0:\n#     handle_error()\n\nimport subprocess\n\ndef run_program(program_name, *args):\n    return subprocess.run([program_name] + list(args), capture_output=True, text=True)",
+  "changes_applied": [
+    {
+      "cwe_id": "078",
+      "cwe_name": "OS Command Injection",
+      "line_number": 11,
+      "change_description": "Replaced os.system with subprocess.run using safe list arguments",
+      "detection_method": "ast",
+      "patch_method": "rule-based"
+    },
+    {
+      "cwe_id": "252",
+      "cwe_name": "Unchecked Return Value",
+      "line_number": 11,
+      "change_description": "Added guidance for checking return values from critical operations",
+      "detection_method": "semantic-pattern",
+      "patch_method": "rule-based"
+    },
+    {
+      "cwe_id": "078",
+      "cwe_name": "OS Command Injection",
+      "line_number": null,
+      "change_description": "Replaced os.system with subprocess.run using safe list arguments",
+      "detection_method": "bandit",
+      "patch_method": "rule-based"
+    },
+    {
+      "cwe_id": "078",
+      "cwe_name": "OS Command Injection",
+      "line_number": null,
+      "change_description": "Replaced os.system with subprocess.run using safe list arguments",
+      "detection_method": "bandit",
+      "patch_method": "rule-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

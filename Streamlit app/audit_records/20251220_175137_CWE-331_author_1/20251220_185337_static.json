@@ -1,0 +1,66 @@
+{
+  "timestamp": "2025-12-20T18:54:56.573078",
+  "bandit_analysis": {
+    "success": true,
+    "issues": [
+      {
+        "test_id": "B311",
+        "test_name": "blacklist",
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "cwe_id": 330,
+        "line_number": 2,
+        "code": "1 def generateRandomString(length):\n2     return ''.join(random.choices(string.ascii_letters, k=length))\n",
+        "description": "Standard pseudo-random generators are not suitable for security/cryptographic purposes.",
+        "more_info": "https://bandit.readthedocs.io/en/1.8.6/blacklists/blacklist_calls.html#b311-random"
+      }
+    ],
+    "summary": {
+      "total_issues": 0,
+      "severity_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 1,
+        "UNDEFINED": 0
+      },
+      "confidence_breakdown": {
+        "HIGH": 1,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNDEFINED": 0
+      },
+      "files_analyzed": 2
+    }
+  },
+  "secondary_tool_analysis": {
+    "success": true,
+    "issues": [],
+    "summary": {
+      "total_issues": 0,
+      "severity_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0
+      }
+    }
+  },
+  "comparison": {
+    "bandit_total": 1,
+    "secondary_total": 0,
+    "bandit_unique_cwes": 1,
+    "secondary_unique_cwes": 0,
+    "overlapping_lines": 0,
+    "overlapping_cwes": 0,
+    "bandit_only_lines": 1,
+    "secondary_only_lines": 0,
+    "bandit_only_cwes": 1,
+    "secondary_only_cwes": 0,
+    "bandit_severity": {
+      "HIGH": 0,
+      "MEDIUM": 0,
+      "LOW": 1,
+      "UNDEFINED": 0
+    },
+    "secondary_types": {}
+  }
+}

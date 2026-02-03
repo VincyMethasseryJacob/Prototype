@@ -1,0 +1,42 @@
+{
+  "workflow_id": "20251222_135030",
+  "workflow": "new_prompt_analysis",
+  "timestamp": "2025-12-22T12:51:46.744036Z",
+  "file": "",
+  "source_file": "",
+  "original_content": "",
+  "llm_response": "import socket\n\nport = int(input(\"Enter port number: \"))\nhost = \"0.0.0.0\"\n\nserver_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\nserver_socket.bind((host, port))\nserver_socket.listen(5)\n\nprint(f\"Server listening on {host}:{port}\")\nconn, addr = server_socket.accept()\nprint(f\"Connection from {addr}\")\n\nconn.close()\nserver_socket.close()",
+  "vulnerabilities_found": 14,
+  "total_vulnerabilities_identified": 14,
+  "total_vulnerabilities_fixed": 12,
+  "total_vulnerabilities_remaining": 2,
+  "initial_detection_bandit_count": 1,
+  "initial_detection_bandit_cwes": [
+    "605"
+  ],
+  "initial_detection_semgrep_count": 1,
+  "initial_detection_semgrep_cwes": [
+    "200"
+  ],
+  "initial_detection_ast_count": 0,
+  "initial_detection_ast_cwes": [],
+  "iteration_detection_bandit_count": 6,
+  "iteration_detection_bandit_cwes": [
+    "605"
+  ],
+  "iteration_detection_semgrep_count": 6,
+  "iteration_detection_semgrep_cwes": [
+    "200"
+  ],
+  "iteration_detection_ast_count": 0,
+  "iteration_detection_ast_cwes": [],
+  "iterations_count": 6,
+  "fixed_cwes": [],
+  "remaining_cwes": [
+    "200",
+    "605"
+  ],
+  "fix_provider_llm": 0,
+  "fix_provider_rule_based": 6,
+  "fix_provider_unknown": 0
+}

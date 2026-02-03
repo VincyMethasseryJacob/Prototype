@@ -1,0 +1,77 @@
+{
+  "timestamp": "2025-12-22T13:38:25.947734",
+  "bandit_analysis": {
+    "success": true,
+    "issues": [
+      {
+        "test_id": "B404",
+        "test_name": "blacklist",
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "cwe_id": 78,
+        "line_number": 7,
+        "code": "6 \n7 import subprocess\n8 \n",
+        "description": "Consider possible security implications associated with the subprocess module.",
+        "more_info": "https://bandit.readthedocs.io/en/1.8.6/blacklists/blacklist_imports.html#b404-import-subprocess"
+      },
+      {
+        "test_id": "B603",
+        "test_name": "subprocess_without_shell_equals_true",
+        "severity": "LOW",
+        "confidence": "HIGH",
+        "cwe_id": 78,
+        "line_number": 10,
+        "code": "9 def run_program(program_name, *args):\n10     return subprocess.run([program_name] + list(args), capture_output=True, text=True)\n",
+        "description": "subprocess call - check for execution of untrusted input.",
+        "more_info": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html"
+      }
+    ],
+    "summary": {
+      "total_issues": 0,
+      "severity_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 2,
+        "UNDEFINED": 0
+      },
+      "confidence_breakdown": {
+        "HIGH": 2,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNDEFINED": 0
+      },
+      "files_analyzed": 2
+    }
+  },
+  "secondary_tool_analysis": {
+    "success": true,
+    "issues": [],
+    "summary": {
+      "total_issues": 0,
+      "severity_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0
+      }
+    }
+  },
+  "comparison": {
+    "bandit_total": 2,
+    "secondary_total": 0,
+    "bandit_unique_cwes": 1,
+    "secondary_unique_cwes": 0,
+    "overlapping_lines": 0,
+    "overlapping_cwes": 0,
+    "bandit_only_lines": 2,
+    "secondary_only_lines": 0,
+    "bandit_only_cwes": 1,
+    "secondary_only_cwes": 0,
+    "bandit_severity": {
+      "HIGH": 0,
+      "MEDIUM": 0,
+      "LOW": 2,
+      "UNDEFINED": 0
+    },
+    "secondary_types": {}
+  }
+}

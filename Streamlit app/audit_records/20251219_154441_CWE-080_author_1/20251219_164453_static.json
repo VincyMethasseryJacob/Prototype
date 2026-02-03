@@ -1,0 +1,54 @@
+{
+  "timestamp": "2025-12-19T16:45:45.193188",
+  "bandit_analysis": {
+    "success": true,
+    "issues": [],
+    "summary": {
+      "total_issues": 0,
+      "severity_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNDEFINED": 0
+      },
+      "confidence_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNDEFINED": 0
+      },
+      "files_analyzed": 2
+    }
+  },
+  "secondary_tool_analysis": {
+    "success": true,
+    "issues": [],
+    "summary": {
+      "total_issues": 0,
+      "severity_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0
+      }
+    }
+  },
+  "comparison": {
+    "bandit_total": 0,
+    "secondary_total": 0,
+    "bandit_unique_cwes": 0,
+    "secondary_unique_cwes": 0,
+    "overlapping_lines": 0,
+    "overlapping_cwes": 0,
+    "bandit_only_lines": 0,
+    "secondary_only_lines": 0,
+    "bandit_only_cwes": 0,
+    "secondary_only_cwes": 0,
+    "bandit_severity": {
+      "HIGH": 0,
+      "MEDIUM": 0,
+      "LOW": 0,
+      "UNDEFINED": 0
+    },
+    "secondary_types": {}
+  }
+}

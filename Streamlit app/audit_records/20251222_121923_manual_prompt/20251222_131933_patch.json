@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-12-22T13:20:48.609262",
+  "original_code": "import pickle\nimport base64\n\ndef deserialize_base64_pickle(b64_string):\n    data = base64.b64decode(b64_string)\n    obj = pickle.loads(data)\n    return obj",
+  "patched_code": "import json\nimport pickle\nimport base64\n\ndef deserialize_base64_pickle(b64_string):\n    data = base64.b64decode(b64_string)\n    obj = json.loads(data)\n    return obj",
+  "changes_applied": [
+    {
+      "cwe_id": "502",
+      "cwe_name": "Deserialization",
+      "line_number": null,
+      "change_description": "Replaced unsafe deserialization with safer alternatives (json.loads, yaml.safe_load)",
+      "detection_method": "bandit",
+      "patch_method": "rule-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

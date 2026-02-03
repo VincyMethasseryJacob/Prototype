@@ -1,0 +1,10 @@
+--- original.py+++ patched.py@@ -1,3 +1,10 @@+
++# SECURITY: Always check return values from security-critical operations
++# Example:
++# result = critical_operation()
++# if result is None or result < 0:
++#     handle_error()
++
+ import subprocess
+ 
+ def run_program(program_name, *args):

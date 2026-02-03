@@ -1,0 +1,72 @@
+{
+  "timestamp": "2025-12-22T13:43:11.936576",
+  "bandit_analysis": {
+    "success": true,
+    "issues": [],
+    "summary": {
+      "total_issues": 0,
+      "severity_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNDEFINED": 0
+      },
+      "confidence_breakdown": {
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNDEFINED": 0
+      },
+      "files_analyzed": 2
+    }
+  },
+  "secondary_tool_analysis": {
+    "success": true,
+    "issues": [
+      {
+        "check_id": "python.lang.security.unverified-ssl-context.unverified-ssl-context",
+        "path": "C:\\Users\\vinz9\\AppData\\Local\\Temp\\tmpw0deplep.py",
+        "start": {
+          "line": 3,
+          "col": 1,
+          "offset": 14
+        },
+        "end": {
+          "line": 3,
+          "col": 67,
+          "offset": 80
+        },
+        "severity": "HIGH",
+        "message": "Unverified SSL context detected. This will permit insecure connections without verifying SSL certificates. Use 'ssl.create_default_context' instead.",
+        "cwe_id": "295"
+      }
+    ],
+    "summary": {
+      "total_issues": 1,
+      "severity_breakdown": {
+        "HIGH": 1,
+        "MEDIUM": 0,
+        "LOW": 0
+      }
+    }
+  },
+  "comparison": {
+    "bandit_total": 0,
+    "secondary_total": 1,
+    "bandit_unique_cwes": 0,
+    "secondary_unique_cwes": 1,
+    "overlapping_lines": 0,
+    "overlapping_cwes": 0,
+    "bandit_only_lines": 0,
+    "secondary_only_lines": 1,
+    "bandit_only_cwes": 0,
+    "secondary_only_cwes": 1,
+    "bandit_severity": {
+      "HIGH": 0,
+      "MEDIUM": 0,
+      "LOW": 0,
+      "UNDEFINED": 0
+    },
+    "secondary_types": {}
+  }
+}

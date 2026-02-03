@@ -1,0 +1,37 @@
+{
+  "workflow_id": "20251219_154533",
+  "workflow": "dataset_prompt_analysis",
+  "timestamp": "2025-12-19T14:46:30.850674Z",
+  "file": "CWE-022/author_1.py",
+  "source_file": "CWE-022/author_1.py",
+  "original_content": "import os\nfrom flask import Flask, request\n\napp = Flask(__name__)\n\n@app.route('/deleteImage')\ndef deleteImage():\n    '''\n    Get file name from request, \n    validate the request, and delete the image file\n    '''",
+  "llm_response": "@app.route('/deleteImage', methods=['POST'])\ndef deleteImage():\n    filename = request.form.get('filename')\n    if not filename or '/' in filename or '..' in filename:\n        return {'status': 'error', 'message': 'Invalid filename'}, 400\n\n    folder = os.path.join(os.getcwd(), 'images')\n    filepath = os.path.join(folder, filename)\n\n    if not os.path.exists(filepath):\n        return {'status': 'error', 'message': 'File does not exist'}, 404\n\n    try:\n        os.remove(filepath)\n        return {'status': 'success', 'message': 'File deleted'}\n    except Exception as e:\n        return {'status': 'error', 'message': str(e)}, 500",
+  "vulnerabilities_found": 3,
+  "total_vulnerabilities_identified": 3,
+  "total_vulnerabilities_fixed": 3,
+  "total_vulnerabilities_remaining": 0,
+  "initial_detection_bandit_count": 0,
+  "initial_detection_bandit_cwes": [],
+  "initial_detection_semgrep_count": 0,
+  "initial_detection_semgrep_cwes": [],
+  "initial_detection_ast_count": 1,
+  "initial_detection_ast_cwes": [
+    "352"
+  ],
+  "iteration_detection_bandit_count": 0,
+  "iteration_detection_bandit_cwes": [],
+  "iteration_detection_semgrep_count": 0,
+  "iteration_detection_semgrep_cwes": [],
+  "iteration_detection_ast_count": 2,
+  "iteration_detection_ast_cwes": [
+    "352"
+  ],
+  "iterations_count": 2,
+  "fixed_cwes": [
+    "352"
+  ],
+  "remaining_cwes": [],
+  "fix_provider_llm": 3,
+  "fix_provider_rule_based": 0,
+  "fix_provider_unknown": 0
+}

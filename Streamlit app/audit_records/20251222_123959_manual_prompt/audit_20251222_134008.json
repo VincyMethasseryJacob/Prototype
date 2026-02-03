@@ -1,0 +1,37 @@
+{
+  "workflow_id": "20251222_134008",
+  "workflow": "new_prompt_analysis",
+  "timestamp": "2025-12-22T12:41:08.755839Z",
+  "file": "",
+  "source_file": "",
+  "original_content": "",
+  "llm_response": "from Crypto.Cipher import AES\nfrom Crypto.Util.Padding import pad\nimport base64\n\ndef aes_cbc_encrypt(key: bytes, data: bytes) -> bytes:\n    iv = b'\\x00' * 16\n    cipher = AES.new(key, AES.MODE_CBC, iv)\n    ct = cipher.encrypt(pad(data, AES.block_size))\n    return ct",
+  "vulnerabilities_found": 8,
+  "total_vulnerabilities_identified": 8,
+  "total_vulnerabilities_fixed": 8,
+  "total_vulnerabilities_remaining": 0,
+  "initial_detection_bandit_count": 2,
+  "initial_detection_bandit_cwes": [
+    "327"
+  ],
+  "initial_detection_semgrep_count": 0,
+  "initial_detection_semgrep_cwes": [],
+  "initial_detection_ast_count": 0,
+  "initial_detection_ast_cwes": [],
+  "iteration_detection_bandit_count": 6,
+  "iteration_detection_bandit_cwes": [
+    "327"
+  ],
+  "iteration_detection_semgrep_count": 0,
+  "iteration_detection_semgrep_cwes": [],
+  "iteration_detection_ast_count": 0,
+  "iteration_detection_ast_cwes": [],
+  "iterations_count": 2,
+  "fixed_cwes": [
+    "327"
+  ],
+  "remaining_cwes": [],
+  "fix_provider_llm": 6,
+  "fix_provider_rule_based": 0,
+  "fix_provider_unknown": 0
+}

@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-12-19T17:07:00.203101",
+  "original_code": "@app.route('/login', methods=['POST'])\ndef do_login():\n    username = request.form.get('username')\n    password = request.form.get('password')\n\n    if check_credentials(username, password):\n        session_id = secrets.token_hex(32)\n        resp = make_response(\"Logged in successfully!\")\n        resp.set_cookie('session_id', session_id, httponly=True, secure=True)\n        return resp\n    else:\n        return render_template('login.html', error=\"Invalid credentials\"), 401",
+  "patched_code": "from flask_wtf import CSRFProtect\nfrom flask_wtf.csrf import CSRFError\nfrom flask import Flask, request, render_template, make_response, abort\nimport secrets\n\napp = Flask(__name__)\napp.config['SECRET_KEY'] = secrets.token_hex(16)\ncsrf = CSRFProtect(app)\n\n@app.errorhandler(CSRFError)\ndef handle_csrf_error(e):\n    return render_template('csrf_error.html', reason=e.description), 400\n\n@app.route('/login', methods=['GET', 'POST'])\n@csrf.exempt  # Remove this line if present elsewhere; ensure it's not here so CSRF applies\ndef do_login():\n    if request.method == 'POST':\n        csrf_token = request.form.get('csrf_token')\n        try:\n            csrf._validate_csrf_token(csrf_token)\n        except Exception:\n            return render_template('csrf_error.html', reason=\"Invalid CSRF token\"), 400\n\n        username = request.form.get('username')\n        password = request.form.get('password')\n\n        if check_credentials(username, password):\n            session_id = secrets.token_hex(32)\n            resp = make_response(\"Logged in successfully!\")\n            resp.set_cookie(\n                'session_id',\n                session_id,\n                httponly=True,\n                secure=True,\n                samesite='Lax'\n            )\n            return resp\n        else:\n            return render_template('login.html', error=\"Invalid credentials\", csrf_token=csrf.generate_csrf()), 401\n    return render_template('login.html', csrf_token=csrf.generate_csrf())",
+  "changes_applied": [
+    {
+      "cwe_id": "352",
+      "cwe_name": "Cross-Site Request Forgery (CSRF)",
+      "line_number": 15,
+      "change_description": "LLM-generated patch for CWE-352",
+      "detection_method": "ast-framework",
+      "patch_method": "llm-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

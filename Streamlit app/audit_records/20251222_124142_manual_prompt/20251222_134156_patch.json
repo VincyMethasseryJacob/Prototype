@@ -1,0 +1,21 @@
+{
+  "timestamp": "2025-12-22T13:43:11.934578",
+  "original_code": "import ssl\n\nssl._create_default_https_context = ssl._create_unverified_context",
+  "patched_code": "import ssl\n\nssl._create_default_https_context = ssl._create_unverified_context",
+  "changes_applied": [],
+  "unpatched_vulnerabilities": [
+    {
+      "cwe_id": "295",
+      "cwe_name": "Certificate Validation",
+      "severity": "HIGH",
+      "confidence": "MEDIUM",
+      "line": 3,
+      "snippet": "ssl._create_default_https_context = ssl._create_unverified_context",
+      "description": "Unverified SSL context detected. This will permit insecure connections without verifying SSL certificates. Use 'ssl.create_default_context' instead.",
+      "explanation": "Semgrep python.lang.security.unverified-ssl-context.unverified-ssl-context: Unverified SSL context detected. This will permit insecure connections without verifying SSL certificates. Use 'ssl.create_default_context' instead.",
+      "source": "semgrep",
+      "detection_method": "semgrep"
+    }
+  ],
+  "patch_success_rate": 0.0
+}

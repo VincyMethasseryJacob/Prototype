@@ -1,0 +1,5 @@
+--- original.py+++ patched.py@@ -7,5 +7,4 @@     filename = 'test.bim'
+     with open(filename, 'wb') as f:
+         f.write(data)
+-    st = os.stat(filename)
+-    os.chmod(filename, st.st_mode | 0o111)+    os.chmod(filename, 0o644)

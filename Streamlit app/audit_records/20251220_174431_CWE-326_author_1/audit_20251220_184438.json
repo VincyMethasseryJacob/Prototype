@@ -1,0 +1,42 @@
+{
+  "workflow_id": "20251220_184438",
+  "workflow": "dataset_prompt_analysis",
+  "timestamp": "2025-12-20T17:45:27.739515Z",
+  "file": "CWE-326/author_1.py",
+  "source_file": "CWE-326/author_1.py",
+  "original_content": "from Crypto.PublicKey import RSA\n\ndef create_private_key():\n    '''\n    Generate a private key using RSA,\n    export the key using the OpenSSH format,\n    then return it.\n    '''",
+  "llm_response": "from Crypto.PublicKey import RSA\n\ndef create_private_key():\n    key = RSA.generate(2048)\n    return key.export_key(format='OpenSSH').decode('utf-8')\n",
+  "vulnerabilities_found": 6,
+  "total_vulnerabilities_identified": 6,
+  "total_vulnerabilities_fixed": 6,
+  "total_vulnerabilities_remaining": 0,
+  "initial_detection_bandit_count": 1,
+  "initial_detection_bandit_cwes": [
+    "327"
+  ],
+  "initial_detection_semgrep_count": 1,
+  "initial_detection_semgrep_cwes": [
+    "326"
+  ],
+  "initial_detection_ast_count": 0,
+  "initial_detection_ast_cwes": [],
+  "iteration_detection_bandit_count": 2,
+  "iteration_detection_bandit_cwes": [
+    "327"
+  ],
+  "iteration_detection_semgrep_count": 2,
+  "iteration_detection_semgrep_cwes": [
+    "326"
+  ],
+  "iteration_detection_ast_count": 0,
+  "iteration_detection_ast_cwes": [],
+  "iterations_count": 2,
+  "fixed_cwes": [
+    "326",
+    "327"
+  ],
+  "remaining_cwes": [],
+  "fix_provider_llm": 2,
+  "fix_provider_rule_based": 2,
+  "fix_provider_unknown": 0
+}

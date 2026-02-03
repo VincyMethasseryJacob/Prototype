@@ -1,0 +1,9 @@
+--- original.py+++ patched.py@@ -1,7 +1,8 @@+import json
+ import pickle
+ import base64
+ 
+ def deserialize_base64_pickle(b64_string):
+     data = base64.b64decode(b64_string)
+-    obj = pickle.loads(data)
++    obj = json.loads(data)
+     return obj

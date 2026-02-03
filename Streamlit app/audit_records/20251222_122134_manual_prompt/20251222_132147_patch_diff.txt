@@ -1,0 +1,26 @@
+--- original.py+++ patched.py@@ -1,4 +1,26 @@ import xml.etree.ElementTree as ET
++
++def validate_input(user_input, input_type='string', max_length=None, allowed_chars=None):
++    """Validate user input with type checking and sanitization."""
++    if user_input is None:
++        raise ValueError("Input cannot be None")
++    
++    if input_type == 'string':
++        if not isinstance(user_input, str):
++            raise TypeError("Expected string input")
++        if max_length and len(user_input) > max_length:
++            raise ValueError(f"Input exceeds maximum length of {max_length}")
++        if allowed_chars and not all(c in allowed_chars for c in user_input):
++            raise ValueError("Input contains invalid characters")
++    elif input_type == 'int':
++        try:
++            return int(user_input)
++        except ValueError:
++            raise ValueError("Input must be an integer")
++    
++    return user_input
++
++
+ 
+ def parse_xml_string(xml_string):
+     return ET.fromstring(xml_string)

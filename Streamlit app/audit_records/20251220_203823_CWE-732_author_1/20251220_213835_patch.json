@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-12-20T21:39:55.174177",
+  "original_code": "import os\n\ndef createExecutableFile(data):\n    '''\n    Create a binary file test.bim and make it executable.\n    '''\n    filename = 'test.bim'\n    with open(filename, 'wb') as f:\n        f.write(data)\n    st = os.stat(filename)\n    os.chmod(filename, st.st_mode | 0o111)",
+  "patched_code": "import os\n\ndef createExecutableFile(data):\n    '''\n    Create a binary file test.bim and make it executable.\n    '''\n    filename = 'test.bim'\n    with open(filename, 'wb') as f:\n        f.write(data)\n    os.chmod(filename, 0o644)",
+  "changes_applied": [
+    {
+      "cwe_id": "276",
+      "cwe_name": "Unknown Vulnerability",
+      "line_number": null,
+      "change_description": "LLM-generated patch for CWE-276",
+      "detection_method": "semgrep",
+      "patch_method": "llm-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}

@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-12-22T13:12:46.852459",
+  "original_code": "import subprocess\n\ndef execute_shell_command(command):\n    process = subprocess.Popen(command, shell=True)\n    process.communicate()",
+  "patched_code": "import subprocess\n\ndef execute_shell_command(command):\n    process = # WARNING: shell=True is dangerous. Use list arguments instead.\n    # WARNING: shell=True is dangerous. Use list arguments instead.\n    # WARNING: shell=True is dangerous. Use list arguments instead.\n    # WARNING: shell=True is dangerous. Use list arguments instead.\n    # WARNING: shell=True is dangerous. Use list arguments instead.\n    # WARNING: shell=True is dangerous. Use list arguments instead.\n    # WARNING: shell=True is dangerous. Use list arguments instead.\n    subprocess.Popen(command, shell=True)\n    process.communicate()",
+  "changes_applied": [
+    {
+      "cwe_id": "078",
+      "cwe_name": "OS Command Injection",
+      "line_number": null,
+      "change_description": "Replaced os.system with subprocess.run using safe list arguments",
+      "detection_method": "semgrep",
+      "patch_method": "rule-based"
+    }
+  ],
+  "unpatched_vulnerabilities": [],
+  "patch_success_rate": 1.0
+}
